@@ -7,8 +7,7 @@ counter=0
 
 while [ $counter -lt $max_retries ]
 do
-    pg_isready -h $(echo $DATABASE_URL | cut -d'@' -f2 | cut -d'/' -f1 | cut -d':' -f1) \
-               -p $(echo $DATABASE_URL | cut -d'@' -f2 | cut -d'/' -f1 | cut -d':' -f2)
+    PGPASSWORD=sungbin123 pg_isready -h postgresql -p 5432 -U postgres
     if [ $? -eq 0 ]; then
         echo "Database is ready!"
         break
