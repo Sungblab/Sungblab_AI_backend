@@ -5,9 +5,12 @@ echo "Waiting for database..."
 max_retries=30
 counter=0
 
+# DATABASE_URL에서 비밀번호 추출
+DB_PASSWORD=$(echo "$DATABASE_URL" | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
+
 while [ $counter -lt $max_retries ]
 do
-    PGPASSWORD=sungbin123 pg_isready -h postgresql -p 5432 -U postgres
+    PGPASSWORD="$DB_PASSWORD" pg_isready -h postgresql -p 5432 -U postgres
     if [ $? -eq 0 ]; then
         echo "Database is ready!"
         break
