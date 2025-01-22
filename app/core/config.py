@@ -3,12 +3,13 @@ from pydantic_settings import BaseSettings
 from pydantic import EmailStr, validator
 
 class Settings(BaseSettings):
-    PROJECT_NAME = "SungbLab AI API"
-    VERSION = "1.0.0"
-    API_V1_STR = "/api/v1"  # 공백 제거
+    # API 설정
+    PROJECT_NAME: str = "SungbLab AI API"
+    VERSION: str = "1.0.0"
+    API_V1_STR: str = "/api/v1"
     
     # 환경 설정
-    ENVIRONMENT: str = "development"  # development, production
+    ENVIRONMENT: str = "development"
     DEBUG: bool = False
     
     # 관리자 계정 설정
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     # 로깅 설정
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE: Optional[str] = None  # 프로덕션에서는 파일 경로 설정
+    LOG_FILE: Optional[str] = None
     
     # JWT 설정
     SECRET_KEY: str
@@ -46,12 +47,12 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: List[str] = [
         "https://sungblab.com",
         "https://www.sungblab.com",
-        "http://localhost:3000"  # 개발 환경용
+        "http://localhost:3000"
     ]
 
     # Database
     DATABASE_URL: str
-    SQLALCHEMY_DATABASE_URL: str = None
+    SQLALCHEMY_DATABASE_URL: Optional[str] = None
 
     # Google OAuth2 설정
     GOOGLE_CLIENT_ID: str
