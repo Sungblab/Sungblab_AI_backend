@@ -3,9 +3,9 @@ from pydantic_settings import BaseSettings
 from pydantic import EmailStr, validator
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "SungbLab AI"
-    VERSION: str = "1.0.0"
-    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME = "SungbLab AI API"
+    VERSION = "1.0.0"
+    API_V1_STR = "/api/v1"  # 공백 제거
     
     # 환경 설정
     ENVIRONMENT: str = "development"  # development, production

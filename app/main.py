@@ -15,19 +15,30 @@ app = FastAPI(
     debug=settings.DEBUG
 )
 
-# 데이터베이스 초기화
-init_db()
-
 # CORS 설정
+origins = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "https://sungblab.com",
+    "https://www.sungblab.com",
+    "https://sungblab-ai-frontend.vercel.app"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix=settings.API_V1_STR)
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database initialization complete")
+
+app.include_router(api_router, prefix=settings.API_V1_STR.strip())
 
 @app.get("/")
 def read_root():
