@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.api_v1.api import api_router
 from app.db.init_db import init_db
-from app.core.logging import setup_logging
+import logging
 
 # 로깅 설정
-logger = setup_logging()
+logger = logging.getLogger("sungblab_api")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
