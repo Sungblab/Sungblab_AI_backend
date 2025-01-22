@@ -12,10 +12,10 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # 관리자 계정 설정
-    ADMIN_EMAIL: str = "admin@sungblab.com"
-    ADMIN_NAME: str = "관리자"
-    ADMIN_INITIAL_PASSWORD: str = "admin123!"
-    CREATE_INITIAL_ADMIN: bool = False  # 프로덕션에서는 False로 설정
+    ADMIN_EMAIL: str
+    ADMIN_NAME: str
+    ADMIN_INITIAL_PASSWORD: str
+    CREATE_INITIAL_ADMIN: bool = False
     
     # 로깅 설정
     LOG_LEVEL: str = "INFO"
