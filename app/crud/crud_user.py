@@ -29,6 +29,8 @@ def create_user(db: Session, *, obj_in: UserCreate) -> User:
         email=obj_in.email,
         full_name=obj_in.full_name,
         hashed_password=hashed_password,
+        auth_provider=AuthProvider.LOCAL,
+        is_active=True
     )
     db.add(db_user)
     db.flush()  # 사용자 ID를 얻기 위해 flush
