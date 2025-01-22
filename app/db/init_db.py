@@ -7,28 +7,29 @@ from app.core.config import settings
 from app.models.subscription import Subscription, SubscriptionPlan
 from datetime import datetime, timedelta
 from app.models.user import User
+from app.core.logger import logger
 
 def init_db() -> None:
+    # 데이터베이스 테이블 생성
     Base.metadata.create_all(bind=engine)
-    
-    # 초기 관리자 계정 생성
+
     db = SessionLocal()
     try:
-        # 관리자 계정이 이미 있는지 확인
-        admin_email = settings.ADMIN_EMAIL  # 환경 변수에서 가져오기
-        admin = crud_user.get_user_by_email(db, email=admin_email)
+        # 관리자 계정이 이미 존재하는지 확인
+        existing_admin = crud_user.get_user_by_email(db, email=settings.ADMIN_EMAIL)
         
-        if not admin and settings.CREATE_INITIAL_ADMIN:  # 환경 변수로 초기 관리자 생성 제어
+        if not existing_admin and settings.CREATE_INITIAL_ADMIN:
             admin_in = UserCreate(
-                email=admin_email,
-                full_name=settings.ADMIN_NAME,  # 환경 변수에서 가져오기
-                password=settings.ADMIN_INITIAL_PASSWORD  # 환경 변수에서 가져오기
+                email=settings.ADMIN_EMAIL,
+                full_name=settings.ADMIN_NAME,
+                password=settings.ADMIN_INITIAL_PASSWORD,
+                is_superuser=True
             )
             admin = crud_user.create_user(db, obj_in=admin_in)
-            # 관리자 권한 부여
-            admin.is_superuser = True
             db.commit()
-            print("관리자 계정이 생성되었습니다.")
+            logger.info("Admin user created")
+        else:
+            logger.info("Admin user already exists")
         
         # 모든 사용자에 대해 기본 구독 정보 생성
         users = db.query(User).all()
@@ -50,6 +51,9 @@ def init_db() -> None:
         
         db.commit()
         
+    except Exception as e:
+        logger.error(f"Error during database initialization: {e}")
+        db.rollback()
     finally:
         db.close()
 
