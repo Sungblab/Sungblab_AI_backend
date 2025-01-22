@@ -6,7 +6,13 @@ from app.db.init_db import init_db
 import logging
 
 # 로깅 설정
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("alembic").setLevel(logging.WARNING)
+
 logger = logging.getLogger("sungblab_api")
+logger.setLevel(settings.LOG_LEVEL)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
