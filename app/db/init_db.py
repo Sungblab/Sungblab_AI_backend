@@ -7,7 +7,9 @@ from app.core.config import settings
 from app.models.subscription import Subscription, SubscriptionPlan
 from datetime import datetime, timedelta
 from app.models.user import User
-from app.core.logger import logger
+import logging
+
+logger = logging.getLogger("sungblab_api")
 
 def init_db() -> None:
     # 데이터베이스 테이블 생성
