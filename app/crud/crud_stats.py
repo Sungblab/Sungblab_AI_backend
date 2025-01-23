@@ -109,16 +109,11 @@ def get_chat_statistics(
     """채팅 사용량 통계를 조회합니다."""
     
     try:
-        print("Fetching all chat statistics")
-        if user_id:
-            print(f"Filtering for user_id: {user_id}")
-
         # 사용자 정보 조회
         users = {
             str(user.id): {"email": user.email, "name": user.full_name or user.email.split('@')[0]}
             for user in db.query(User).all()
         }
-        print(f"Found users: {users}")
 
         # 채팅방 수 쿼리 - 각각 별도로 실행
         project_chat_query = db.query(func.count(ProjectChat.id))
@@ -131,8 +126,6 @@ def get_chat_statistics(
         project_chat_count = project_chat_query.scalar() or 0
         chat_room_count = chat_room_query.scalar() or 0
         total_chats = project_chat_count + chat_room_count
-
-        print(f"Total chats found: {total_chats} (project: {project_chat_count}, chat: {chat_room_count})")
 
         # 메시지 수 쿼리
         message_query = db.query(func.count(ChatMessage.id))
@@ -150,8 +143,6 @@ def get_chat_statistics(
         message_count = message_query.scalar() or 0
         project_message_count = project_message_query.scalar() or 0
         total_messages = message_count + project_message_count
-
-        print(f"Total messages found: {total_messages} (chat: {message_count}, project: {project_message_count})")
 
         # 사용자별 채팅방 수 쿼리
         user_chat_stats = db.query(
@@ -322,10 +313,8 @@ def get_chat_statistics(
             } for stat in project_stats]
         }
 
-        print(f"Final result: {result}")
         return result
     except Exception as e:
-        print(f"Error in get_chat_statistics: {str(e)}")
         # 기본값 반환
         return {
             'total_chats': 0,
