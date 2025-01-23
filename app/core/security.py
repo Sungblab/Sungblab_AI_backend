@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.crud import crud_user
 
 logger = logging.getLogger("sungblab_api")
 
@@ -36,10 +35,9 @@ def create_access_token(
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-def get_current_user(
-    db: Session = Depends(get_db),
+async def get_current_user_id(
     token: str = Depends(oauth2_scheme)
-):
+) -> str:
     try:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
@@ -51,14 +49,10 @@ def get_current_user(
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        return user_id
     except jwt.JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user = crud_user.get_user(db, id=user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user 
+        ) 
