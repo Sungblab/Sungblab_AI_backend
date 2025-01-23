@@ -7,7 +7,7 @@ import logging
 
 from app.core.config import settings
 from app.core import security
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user
 from app.core.oauth2 import verify_google_token
 from app.db.session import get_db
 from app.schemas.auth import Token, UserCreate, User, SocialLogin, GoogleUser
@@ -21,15 +21,6 @@ import secrets
 logger = logging.getLogger("sungblab_api")
 
 router = APIRouter()
-
-async def get_current_user(
-    db: Session = Depends(get_db),
-    user_id: str = Depends(get_current_user_id)
-) -> User:
-    user = crud_user.get_user(db, id=user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
 class LoginRequest(BaseModel):
     email: str

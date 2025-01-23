@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.crud import crud_user
 
 logger = logging.getLogger("sungblab_api")
 
@@ -17,6 +18,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    logger.debug("Verifying password")  # 간단한 메시지로 변경
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
@@ -33,12 +35,15 @@ def create_access_token(
         )
     to_encode = {"exp": expire, "sub": str(subject)}
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    logger.debug(f"Access token created for user ID: {subject}")  # 사용자 ID 포함
     return encoded_jwt
 
-async def get_current_user_id(
+def get_current_user(
+    db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme)
-) -> str:
+):
     try:
+        logger.debug("Verifying token")  # 간단한 메시지로 변경
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
@@ -49,10 +54,14 @@ async def get_current_user_id(
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return user_id
     except jwt.JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        ) 
+        )
+    
+    user = crud_user.get_user(db, id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user 
