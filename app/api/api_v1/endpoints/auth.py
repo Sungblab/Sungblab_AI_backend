@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import logging
 
 from app.core.config import settings
 from app.core import security
@@ -16,6 +17,8 @@ from app.core.email import send_reset_password_email
 from app.models.user import AuthProvider
 from typing import Optional
 import secrets
+
+logger = logging.getLogger("sungblab_api")
 
 router = APIRouter()
 
@@ -75,6 +78,7 @@ def login_json(
     access_token = security.create_access_token(
         user.id, expires_delta=access_token_expires
     )
+    logger.debug(f"Access token created for user: {user.email}")
     return {
         "access_token": access_token,
         "token_type": "bearer"
