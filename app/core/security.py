@@ -14,17 +14,12 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        print(f"Verifying password... (hashed length: {len(hashed_password)})")
         result = bcrypt.checkpw(
             plain_password.encode('utf-8'),
             hashed_password.encode('utf-8')
         )
-        print(f"Password verification result: {result}")
         return result
     except Exception as e:
-        print(f"Password verification error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return False
 
 def get_password_hash(password: str) -> str:
@@ -32,12 +27,8 @@ def get_password_hash(password: str) -> str:
         salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
         result = hashed.decode('utf-8')
-        print(f"Generated hash length: {len(result)}")
         return result
     except Exception as e:
-        print(f"Password hashing error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         raise e
 
 def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
@@ -60,7 +51,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(get
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        print(f"Received token: {token}")
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
@@ -68,7 +58,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(get
         if user_id is None:
             raise credentials_exception
     except JWTError as e:
-        print(f"JWT Error: {str(e)}")
         raise credentials_exception
     
     from app.crud.crud_user import get_user
