@@ -164,6 +164,9 @@ def count_tokens(request: ChatRequest) -> dict:
 router = APIRouter()
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
+ALLOWED_MODELS = ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
+MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
+
 class ProjectResponse(BaseModel):
     id: str
     name: str
@@ -393,11 +396,32 @@ async def stream_project_chat(
                 file_data = None
                 if file:
                     file_content = await file.read()
-                    file_data = {
-                        "type": file.content_type,
-                        "name": file.filename,
-                        "data": base64.b64encode(file_content).decode('utf-8')
-                    }
+                    file_data = base64.b64encode(file_content).decode('utf-8')
+                    content_type = "image" if file.content_type.startswith("image/") else "document"
+                    
+                    # 멀티모달 메시지 구조 구성
+                    if request_data["model"] in MULTIMODAL_MODELS:
+                        user_message = {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": content_type,
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": file.content_type,
+                                        "data": file_data,
+                                    },
+                                }
+                            ],
+                        }
+                        
+                        if request_data["messages"][-1].get("content"):
+                            user_message["content"].append({
+                                "type": "text",
+                                "text": request_data["messages"][-1]["content"]
+                            })
+                        
+                        request_data["messages"][-1] = user_message
                 
                 # 메시지 저장
                 crud_project.create_chat_message(
@@ -405,9 +429,9 @@ async def stream_project_chat(
                     project_id=project_id,
                     chat_id=chat_id,
                     obj_in=ChatMessageCreate(
-                        content=user_message["content"],
+                        content=user_message.get("content") if isinstance(user_message, dict) else user_message,
                         role="user",
-                        file=file_data or user_message.get("file")
+                        file=file_data
                     )
                 )
 
@@ -446,18 +470,15 @@ async def stream_project_chat(
 
                 # AI 응답 생성 및 스트리밍
                 accumulated_content = ""
-                response = client.messages.create(
+                with client.messages.stream(
                     model=request_data["model"],
                     system=system,
                     messages=recent_messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     stream=True
-                )
-
-                for chunk in response:
-                    if hasattr(chunk, 'type') and chunk.type == "content_block_delta":
-                        text = chunk.delta.text
+                ) as stream:
+                    for text in stream.text_stream:
                         accumulated_content += text
                         yield f"data: {json.dumps({'content': text})}\n\n"
 
