@@ -120,6 +120,16 @@ class ChatRequest(BaseModel):
     messages: List[Dict[str, Any]]
     project_type: Optional[str] = None
 
+class FileInfo(BaseModel):
+    type: str
+    name: str
+    data: str
+
+class ChatMessageCreate(BaseModel):
+    content: str
+    role: str
+    file: Optional[FileInfo] = None
+
 def count_tokens(request: ChatRequest) -> dict:
     """토큰 수를 계산하고 과금 유형별로 분류합니다."""
     try:
@@ -461,6 +471,15 @@ async def stream_project_chat(
                 # 사용자 메시지 저장 (파일 처리 포함)
                 user_message = request_data["messages"][-1]
                 
+                # 파일 정보 구성
+                file_info = None
+                if file_data:
+                    file_info = FileInfo(
+                        type=file_type,
+                        name=file.filename,
+                        data=file_data
+                    )
+                
                 # 메시지 저장
                 crud_project.create_chat_message(
                     db=db,
@@ -469,7 +488,7 @@ async def stream_project_chat(
                     obj_in=ChatMessageCreate(
                         content=user_message["content"],
                         role="user",
-                        file=file_data or user_message.get("file")
+                        file=file_info
                     )
                 )
 
