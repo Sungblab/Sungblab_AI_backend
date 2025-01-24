@@ -514,6 +514,14 @@ async def stream_project_chat(
                         system.append(ASSIGNMENT_PROMPT)
                     elif project.type == "record":
                         system.append(RECORD_PROMPT)
+                    
+                    # 프로젝트의 추가 시스템 프롬프트가 있다면 추가
+                    if project.system_instruction:
+                        system.append({
+                            "type": "text",
+                            "text": project.system_instruction,
+                            "cache_control": {"type": "ephemeral"}
+                        })
 
                 # 프로젝트 설정
                 default_settings = PROJECT_DEFAULT_SETTINGS.get(project.type, {
