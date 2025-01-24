@@ -100,7 +100,7 @@ PROJECT_DEFAULT_SETTINGS = {
         "temperature": 0.7   # 창의적인 답변 허용
     },
     "record": {
-        "max_tokens": 2048,  # 생기부는 비교적 짧고 명확하게
+        "max_tokens": 8192,  # 생기부는 비교적 짧고 명확하게
         "temperature": 0.3   # 보수적이고 안정적인 답변
     }
 }
