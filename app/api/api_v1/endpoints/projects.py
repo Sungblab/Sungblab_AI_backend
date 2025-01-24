@@ -82,6 +82,7 @@ RECORD_PROMPT = {
    - 일반교과: 1500바이트
    - 진로과목: 2100바이트
    - 창체영역: 500자
+   - 사용자가 요구한 바이트 수에 맞춰 작성 해야함
    
 4. 금지사항
    - 교외 수상, 공인어학시험 성적 기재 금지
@@ -507,21 +508,22 @@ async def stream_project_chat(
 
                 # 시스템 프롬프트 설정
                 system = [BRIEF_SYSTEM_PROMPT]
-                is_first_message = len(request_data["messages"]) <= 1
                 
+                # 프로젝트의 추가 시스템 프롬프트가 있다면 항상 추가
+                if project.system_instruction:
+                    system.append({
+                        "type": "text",
+                        "text": project.system_instruction,
+                        "cache_control": {"type": "ephemeral"}
+                    })
+
+                # 첫 메시지인 경우 프로젝트 타입별 프롬프트 추가
+                is_first_message = len(request_data["messages"]) <= 1
                 if is_first_message:
                     if project.type == "assignment":
                         system.append(ASSIGNMENT_PROMPT)
                     elif project.type == "record":
                         system.append(RECORD_PROMPT)
-                    
-                    # 프로젝트의 추가 시스템 프롬프트가 있다면 추가
-                    if project.system_instruction:
-                        system.append({
-                            "type": "text",
-                            "text": project.system_instruction,
-                            "cache_control": {"type": "ephemeral"}
-                        })
 
                 # 프로젝트 설정
                 default_settings = PROJECT_DEFAULT_SETTINGS.get(project.type, {
