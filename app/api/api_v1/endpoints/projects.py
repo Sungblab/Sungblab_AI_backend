@@ -18,6 +18,9 @@ from app.core.config import settings
 from datetime import datetime
 import io
 import base64
+import PyPDF2
+from PIL import Image
+from io import BytesIO
 
 # 기본 시스템 프롬프트 (공통)
 BRIEF_SYSTEM_PROMPT = {
@@ -105,6 +108,13 @@ PROJECT_DEFAULT_SETTINGS = {
     }
 }
 
+# 파일 업로드 관련 상수
+ALLOWED_MODELS = ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
+MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
+MAX_FILE_SIZE = 32 * 1024 * 1024  # 32MB
+MAX_PDF_PAGES = 100
+MAX_IMAGE_DIMENSION = 8000
+
 class ChatRequest(BaseModel):
     model: str
     messages: List[Dict[str, Any]]
@@ -163,9 +173,6 @@ def count_tokens(request: ChatRequest) -> dict:
 
 router = APIRouter()
 client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-ALLOWED_MODELS = ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
-MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
 
 class ProjectResponse(BaseModel):
     id: str
@@ -368,6 +375,42 @@ def create_project_chat_message(
     )
     return message
 
+async def validate_file(file: UploadFile) -> bool:
+    content = await file.read()
+    await file.seek(0)  # 파일 포인터를 다시 처음으로
+
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="파일 크기는 32MB를 초과할 수 없습니다.")
+
+    if file.content_type == "application/pdf":
+        try:
+            pdf = PyPDF2.PdfReader(BytesIO(content))
+            if len(pdf.pages) > MAX_PDF_PAGES:
+                raise HTTPException(status_code=400, detail="PDF는 100페이지를 초과할 수 없습니다.")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="유효하지 않은 PDF 파일입니다.")
+    
+    elif file.content_type.startswith("image/"):
+        try:
+            img = Image.open(BytesIO(content))
+            if img.width > MAX_IMAGE_DIMENSION or img.height > MAX_IMAGE_DIMENSION:
+                raise HTTPException(status_code=400, detail="이미지 크기는 8000x8000 픽셀을 초과할 수 없습니다.")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="유효하지 않은 이미지 파일입니다.")
+
+    return True
+
+async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
+    try:
+        print(f"Starting to process file: {file.filename}")
+        contents = await file.read()
+        base64_data = base64.b64encode(contents).decode('utf-8')
+        print(f"File processed successfully, size: {len(contents)} bytes")
+        return base64_data, file.content_type
+    except Exception as e:
+        print(f"Error processing file: {str(e)}")
+        raise
+
 @router.post("/{project_id}/chats/{chat_id}/chat")
 async def stream_project_chat(
     *,
@@ -387,41 +430,36 @@ async def stream_project_chat(
         if not chat:
             raise HTTPException(status_code=404, detail="Chat not found")
 
+        request_data = json.loads(request)
+        if request_data["model"] not in ALLOWED_MODELS:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid model specified. Allowed models: {ALLOWED_MODELS}"
+            )
+
+        # 파일이 있고 선택된 모델이 멀티모달을 지원하지 않는 경우
+        if file and request_data["model"] not in MULTIMODAL_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected model does not support file attachments. Please use Claude 3 Sonnet for files."
+            )
+
+        # 파일이 있는 경우 처리
+        file_data = None
+        file_type = None
+        if file:
+            # 파일 유효성 검사
+            await validate_file(file)
+            try:
+                file_data, file_type = await process_file_to_base64(file)
+            except Exception as e:
+                print(f"Error processing file: {str(e)}")
+                raise HTTPException(status_code=400, detail="Failed to process file")
+
         async def generate_response():
             try:
-                request_data = json.loads(request)
-                
                 # 사용자 메시지 저장 (파일 처리 포함)
                 user_message = request_data["messages"][-1]
-                file_data = None
-                if file:
-                    file_content = await file.read()
-                    file_data = base64.b64encode(file_content).decode('utf-8')
-                    content_type = "image" if file.content_type.startswith("image/") else "document"
-                    
-                    # 멀티모달 메시지 구조 구성
-                    if request_data["model"] in MULTIMODAL_MODELS:
-                        user_message = {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": content_type,
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": file.content_type,
-                                        "data": file_data,
-                                    },
-                                }
-                            ],
-                        }
-                        
-                        if request_data["messages"][-1].get("content"):
-                            user_message["content"].append({
-                                "type": "text",
-                                "text": request_data["messages"][-1]["content"]
-                            })
-                        
-                        request_data["messages"][-1] = user_message
                 
                 # 메시지 저장
                 crud_project.create_chat_message(
@@ -429,13 +467,13 @@ async def stream_project_chat(
                     project_id=project_id,
                     chat_id=chat_id,
                     obj_in=ChatMessageCreate(
-                        content=user_message.get("content") if isinstance(user_message, dict) else user_message,
+                        content=user_message["content"],
                         role="user",
-                        file=file_data
+                        file=file_data or user_message.get("file")
                     )
                 )
 
-                # 토큰 카운팅 (동기 함수 호출)
+                # 토큰 카운팅
                 token_counts = count_tokens(
                     ChatRequest(
                         model=request_data["model"],
@@ -447,7 +485,6 @@ async def stream_project_chat(
                 # 메시지 이력 관리 (최근 5개만 유지)
                 MAX_MESSAGES = 5
                 recent_messages = request_data["messages"][-MAX_MESSAGES:]
-                older_messages = request_data["messages"][:-MAX_MESSAGES] if len(request_data["messages"]) > MAX_MESSAGES else []
 
                 # 시스템 프롬프트 설정
                 system = [BRIEF_SYSTEM_PROMPT]
@@ -468,17 +505,49 @@ async def stream_project_chat(
                 max_tokens = project.settings.get('max_tokens', default_settings["max_tokens"]) if project.settings else default_settings["max_tokens"]
                 temperature = project.settings.get('temperature', default_settings["temperature"]) if project.settings else default_settings["temperature"]
 
+                # 파일이 있는 경우 메시지 구성
+                messages = []
+                if file_data and file_type and request_data["model"] in MULTIMODAL_MODELS:
+                    content_type = "image" if file_type.startswith("image/") else "document"
+                    user_message = {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": content_type,
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": file_type,
+                                    "data": file_data,
+                                },
+                            }
+                        ],
+                    }
+                    
+                    if request_data["messages"] and request_data["messages"][-1]["content"]:
+                        user_message["content"].append({
+                            "type": "text",
+                            "text": request_data["messages"][-1]["content"]
+                        })
+                    
+                    messages = request_data["messages"][:-1] if request_data["messages"] else []
+                    messages.append(user_message)
+                else:
+                    messages = recent_messages
+
                 # AI 응답 생성 및 스트리밍
                 accumulated_content = ""
-                with client.messages.stream(
+                response = client.messages.create(
                     model=request_data["model"],
                     system=system,
-                    messages=recent_messages,
+                    messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     stream=True
-                ) as stream:
-                    for text in stream.text_stream:
+                )
+
+                for chunk in response:
+                    if hasattr(chunk, 'type') and chunk.type == "content_block_delta":
+                        text = chunk.delta.text
                         accumulated_content += text
                         yield f"data: {json.dumps({'content': text})}\n\n"
 
@@ -494,7 +563,7 @@ async def stream_project_chat(
                         )
                     )
 
-                # 토큰 사용량 저장 (동기 함수 호출)
+                # 토큰 사용량 저장
                 output_token_response = client.messages.count_tokens(
                     model=request_data["model"],
                     messages=[{"role": "assistant", "content": accumulated_content}]
@@ -502,11 +571,7 @@ async def stream_project_chat(
                 output_tokens = output_token_response.input_tokens
 
                 if current_user:
-                    # 프로젝트 타입 확인 및 chat_type 설정
-                    chat_type = None
-                    if project and project.type:
-                        chat_type = f"project_{project.type}"  # project_assignment 또는 project_record
-                    
+                    chat_type = f"project_{project.type}" if project and project.type else None
                     crud_stats.create_token_usage(
                         db=db,
                         user_id=str(current_user.id),
@@ -517,7 +582,7 @@ async def stream_project_chat(
                         cache_hit_tokens=token_counts['cache_hit_tokens'],
                         output_tokens=output_tokens,
                         timestamp=datetime.now(),
-                        chat_type=chat_type  # chat_type 설정
+                        chat_type=chat_type
                     )
 
                 print(f"Token usage saved - Project chat:")
