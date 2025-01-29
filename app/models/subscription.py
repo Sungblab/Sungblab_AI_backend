@@ -15,9 +15,9 @@ def generate_uuid():
 # 플랜별 제한량 정의
 PLAN_LIMITS = {
     "FREE": {
-        "basic_chat": 50,        # haiku + deepseek-chat
-        "normal_analysis": 15,   # sonar + deepseek-chat
-        "advanced_analysis": 10   # sonnet + deepseek-reasoner
+        "basic_chat": 50,      
+        "normal_analysis": 10,  
+        "advanced_analysis": 5   
     },
     "BASIC": {
         "basic_chat": 200,       # 기본 대화 100회
