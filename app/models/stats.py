@@ -19,6 +19,8 @@ class TokenUsage(Base):
     cache_hit_tokens = Column(Integer, nullable=False, default=0)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     chat_type = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     def to_dict(self):
         return {
