@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models.base import Base
+from app.db.base import Base
 from app.db.session import engine, SessionLocal
 from app.crud import crud_user
 from app.schemas.auth import UserCreate
@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.models.subscription import Subscription, SubscriptionPlan
 from datetime import datetime, timedelta
 from app.models.user import User
+from app.core.utils import get_kr_time
 import logging
 
 logger = logging.getLogger("sungblab_api")
@@ -41,12 +42,15 @@ def init_db() -> None:
             ).first()
             
             if not subscription:
+                # 초기 갱신일 설정 - timezone 정보 포함
+                initial_renewal_date = get_kr_time() + timedelta(days=30)
+                
                 subscription = Subscription(
                     user_id=str(user.id),
                     plan=SubscriptionPlan.FREE,
                     status="active",
-                    start_date=datetime.utcnow(),
-                    renewal_date=datetime.utcnow() + timedelta(days=30),
+                    start_date=get_kr_time(),
+                    renewal_date=initial_renewal_date,
                     message_limit=15
                 )
                 db.add(subscription)
@@ -60,6 +64,4 @@ def init_db() -> None:
         db.close()
 
 if __name__ == "__main__":
-    print("데이터베이스 초기화를 시작합니다...")
     init_db()
-    print("데이터베이스 초기화가 완료되었습니다.") 

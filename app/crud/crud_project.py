@@ -8,6 +8,16 @@ from app.schemas.chat import ChatCreate, ChatUpdate, ChatMessageCreate
 import uuid
 from datetime import datetime
 
+# 파일 상단에 MODEL_GROUP_MAPPING 추가
+MODEL_GROUP_MAPPING = {
+    "claude-3-5-sonnet-20241022": "claude",
+    "claude-3-5-haiku-20241022": "claude",
+    "sonar-pro": "sonar",
+    "sonar": "sonar",
+    "deepseek-reasoner": "deepseek",
+    "deepseek-chat": "deepseek"
+}
+
 def create(db: Session, *, obj_in: ProjectCreate, user_id: str) -> Project:
     db_obj = Project(
         id=str(uuid.uuid4()),
@@ -100,11 +110,9 @@ def update_chat(
 def get_chat_messages(db: Session, *, project_id: str, chat_id: str) -> List[Dict[str, Any]]:
     chat = get_chat(db, project_id=project_id, chat_id=chat_id)
     if not chat:
-        print(f"Chat not found for project_id: {project_id}, chat_id: {chat_id}")
         return []
     
     # 메시지 조회 전 채팅 정보 출력
-    print(f"Found chat: {chat.id}, project_id: {chat.project_id}")
     
     # 메시지 직접 쿼리
     messages = db.query(ProjectMessage).filter(
@@ -118,12 +126,14 @@ def get_chat_messages(db: Session, *, project_id: str, chat_id: str) -> List[Dic
             "role": message.role,
             "room_id": message.room_id,
             "created_at": message.created_at.isoformat() if message.created_at else None,
-            "file": message.file
+            "updated_at": message.updated_at.isoformat() if message.updated_at else None,
+            "files": message.files,
+            "citations": message.citations,
+            "reasoning_content": message.reasoning_content
         }
         for message in messages
     ]
     
-    print(f"Retrieved {len(result)} messages for chat {chat_id}")
     return result
 
 def create_chat_message(
@@ -131,53 +141,41 @@ def create_chat_message(
 ) -> Dict[str, Any]:
     chat = get_chat(db, project_id=project_id, chat_id=chat_id)
     if not chat:
-        print(f"Failed to create message: Chat not found (project_id: {project_id}, chat_id: {chat_id})")
         raise ValueError("Chat not found")
     
-    # 새 메시지 생성
     try:
+        current_time = datetime.now()
         db_message = ProjectMessage(
             content=obj_in.content,
             role=obj_in.role,
             room_id=chat_id,
-            file=obj_in.file.dict() if obj_in.file else None
+            files=[file.dict() for file in obj_in.files] if obj_in.files else None,
+            citations=obj_in.citations,
+            reasoning_content=obj_in.reasoning_content,
+            thought_time=obj_in.thought_time,
+            created_at=current_time,
+            updated_at=current_time
         )
         
         # 채팅과 메시지 연결
         chat.messages.append(db_message)
         
-        # 메시지 카운트 증가 (디버깅 로그 추가)
-        print(f"Attempting to increment message count for user_id: {chat.user_id}")
+        # 메시지 카운트 증가 (수정된 부분)
         user = db.query(User).filter(User.id == chat.user_id).first()
-        if user:
-            print(f"Found user: {user.id}, current message count: {user.message_count}")
-            if obj_in.role == "assistant":  # AI 응답일 때만 카운트
-                user.message_count = (user.message_count or 0) + 1
-                print(f"Incremented message count to: {user.message_count}")
-                
-                # 구독 정보의 메시지 카운트도 업데이트
-                subscription = db.query(Subscription).filter(Subscription.user_id == chat.user_id).first()
-                if subscription:
-                    subscription.message_count = (subscription.message_count or 0) + 1
-                    print(f"Incremented subscription message count to: {subscription.message_count}")
-                    db.add(subscription)
-                else:
-                    print(f"Warning: Subscription not found for user_id: {chat.user_id}")
-                
-                db.add(user)
-        else:
-            print(f"Warning: User not found for user_id: {chat.user_id}")
+        if user and obj_in.role == "assistant":
+            # obj_in에서 model 속성이 있는지 확인
+            model = getattr(obj_in, 'model', None)
+            if model:
+                model_group = MODEL_GROUP_MAPPING.get(model)
+                if model_group:
+                    user.message_counts[model_group] = user.message_counts.get(model_group, 0) + 1
+                    db.add(user)
         
-        # 세션에 추가하고 커밋
         db.add(db_message)
         db.commit()
         db.refresh(db_message)
         
-        print(f"Successfully created message for chat {chat_id}")
-        
-        # 응답 형식에 맞게 반환
         return db_message.to_dict()
     except Exception as e:
-        print(f"Error creating message: {str(e)}")
         db.rollback()
         raise 

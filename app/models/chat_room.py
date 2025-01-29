@@ -1,7 +1,8 @@
 from sqlalchemy import Column, String, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.orm import relationship
-from app.models.base import Base
+from app.db.base_class import Base
 from datetime import datetime
+from app.core.utils import get_kr_time
 import uuid
 
 def generate_uuid():
@@ -13,15 +14,7 @@ class ChatRoom(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     name = Column(String)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_kr_time)
+    updated_at = Column(DateTime, default=get_kr_time)
 
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    room_id = Column(String, ForeignKey("chatroom.id"), nullable=False)
-    content = Column(Text, nullable=False)
-    role = Column(String, nullable=False)  # 'user' or 'assistant'
-    created_at = Column(DateTime, default=datetime.utcnow)
-    file = Column(JSON, nullable=True)  # 파일 정보를 JSON으로 저장 
+    messages = relationship("ChatMessage", back_populates="chat", cascade="all, delete-orphan")

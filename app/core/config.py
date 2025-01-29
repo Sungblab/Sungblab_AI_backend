@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     
+    # DeepSeek API 설정
+    DEEPSEEK_API_KEY: Optional[str] = None
+    DEEPSEEK_API_URL: str = "https://api.deepseek.com"
+    
     # 관리자 계정 설정
     ADMIN_EMAIL: str
     ADMIN_NAME: str
@@ -30,6 +34,9 @@ class Settings(BaseSettings):
     
     # Claude API 설정
     ANTHROPIC_API_KEY: str
+    
+    # Sonar API
+    SONAR_API_KEY: str
     
     # Email Settings
     SMTP_HOST: str
@@ -58,6 +65,10 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        print(f"Environment: {self.ENVIRONMENT}")
 
     @validator("SQLALCHEMY_DATABASE_URL", pre=True)
     def assemble_db_url(cls, v: Optional[str], values: dict) -> str:

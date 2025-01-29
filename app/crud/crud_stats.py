@@ -2,7 +2,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from app.models.stats import TokenUsage
 from app.models.project import ProjectChat, ProjectMessage
-from app.models.chat_room import ChatRoom, ChatMessage
+from app.models.chat_room import ChatRoom
+from app.models.chat import ChatMessage
 from app.models.user import User
 from datetime import datetime
 from typing import Optional, List, Dict

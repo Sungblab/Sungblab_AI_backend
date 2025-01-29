@@ -1,9 +1,9 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, JSON, Enum, Boolean, func
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, JSON, Enum, Boolean, func, Float
 from sqlalchemy.orm import relationship
 import enum
 from datetime import datetime
 import uuid
-from app.models.base import Base
+from app.db.base_class import Base
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -80,8 +80,12 @@ class ProjectMessage(Base):
     content = Column(Text, nullable=False)
     role = Column(String, nullable=False)  # user, assistant
     room_id = Column(String, ForeignKey("projectchat.id", ondelete="CASCADE"), nullable=False)
-    created_at = Column(DateTime, default=func.now())
-    file = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    files = Column(JSON, nullable=True)
+    citations = Column(JSON, nullable=True)
+    reasoning_content = Column(String, nullable=True)
+    thought_time = Column(Float, nullable=True)
 
     chat = relationship("ProjectChat", back_populates="messages")
 
@@ -92,5 +96,9 @@ class ProjectMessage(Base):
             "role": self.role,
             "room_id": self.room_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "file": self.file
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "files": self.files,
+            "citations": self.citations,
+            "reasoning_content": self.reasoning_content,
+            "thought_time": self.thought_time
         } 

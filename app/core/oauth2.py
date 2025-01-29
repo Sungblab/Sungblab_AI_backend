@@ -13,7 +13,6 @@ async def verify_google_token(token: str) -> Optional[GoogleUser]:
             )
             
             if response.status_code != 200:
-                print(f"Google API error: {response.status_code} - {response.text}")
                 return None
                 
             userinfo = response.json()
@@ -25,5 +24,4 @@ async def verify_google_token(token: str) -> Optional[GoogleUser]:
                 sub=userinfo['sub']
             )
     except Exception as e:
-        print(f"Google token verification failed: {str(e)}")
         return None 

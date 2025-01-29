@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   web:
     build: .
@@ -8,6 +6,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./app/logs:/app/logs
+      - ./alembic:/app/alembic
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${SECRET_KEY}
@@ -24,12 +23,14 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - SONAR_API_KEY=${SONAR_API_KEY}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
       - ADMIN_EMAIL=${ADMIN_EMAIL}
       - ADMIN_NAME=${ADMIN_NAME}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD}
       - CREATE_INITIAL_ADMIN=${CREATE_INITIAL_ADMIN}
-      - ENVIRONMENT=production
-      - DEBUG=false
+      - ENVIRONMENT=development
+      - DEBUG=true
       - PYTHONPATH=/app
     command: ./start.sh

@@ -85,4 +85,55 @@ def send_reset_password_email(email_to: str, token: str) -> None:
         environment={
             "reset_link": reset_link,
         },
+    )
+
+def send_verification_email(email_to: str, verification_code: str) -> None:
+    """
+    이메일 인증 코드 전송
+    """
+    subject = "[Sungblab AI] 이메일 인증 안내"
+    html_template = """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #2563eb; margin-bottom: 20px;">이메일 인증 안내</h2>
+            
+            <p style="color: #374151; margin-bottom: 15px;">안녕하세요,</p>
+            
+            <p style="color: #374151; margin-bottom: 15px;">
+                Sungblab AI 회원가입을 위한 이메일 인증 코드입니다.<br>
+                아래의 인증 코드를 입력해주세요.
+            </p>
+            
+            <div style="margin: 30px 0; text-align: center;">
+                <div style="background-color: #f3f4f6; 
+                            padding: 20px; 
+                            border-radius: 8px; 
+                            font-size: 24px; 
+                            font-weight: bold; 
+                            letter-spacing: 4px;
+                            color: #1f2937;">
+                    {{ verification_code }}
+                </div>
+            </div>
+            
+            <p style="color: #374151; margin-bottom: 15px;">
+                이 인증 코드는 10분 동안 유효합니다.<br>
+                본인이 요청하지 않은 경우 이 메일을 무시하시면 됩니다.
+            </p>
+            
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                <p style="color: #6b7280; font-size: 14px;">
+                    본 메일은 발신 전용으로 회신이 불가능합니다.<br>
+                    문의사항이 있으시면 고객센터를 이용해 주시기 바랍니다.
+                </p>
+            </div>
+        </div>
+    """
+    
+    send_email(
+        email_to=email_to,
+        subject=subject,
+        html_template=html_template,
+        environment={
+            "verification_code": verification_code,
+        },
     ) 

@@ -1,6 +1,7 @@
 from typing import Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from app.core.utils import get_kr_time
 
 from app.core.security import get_password_hash, verify_password
 from app.models.user import User, AuthProvider
@@ -20,7 +21,7 @@ def get_user_by_name(db: Session, full_name: str) -> Optional[User]:
 def get_user_by_reset_token(db: Session, token: str) -> Optional[User]:
     return db.query(User).filter(
         User.reset_password_token == token,
-        User.reset_password_token_expires > datetime.utcnow()
+        User.reset_password_token_expires > get_kr_time()
     ).first()
 
 def create_user(db: Session, *, obj_in: UserCreate) -> User:
@@ -35,15 +36,20 @@ def create_user(db: Session, *, obj_in: UserCreate) -> User:
     db.add(db_user)
     db.flush()  # 사용자 ID를 얻기 위해 flush
 
-    # 기본 구독 정보 생성
+    # 기본 구독 정보 생성 (새로운 그룹 기반 시스템)
     subscription = Subscription(
         user_id=db_user.id,
         plan=SubscriptionPlan.FREE,
         status="active",
-        start_date=datetime.utcnow(),
+        start_date=get_kr_time(),
+        end_date=get_kr_time() + timedelta(days=30),
         auto_renew=True,
-        message_count=0,
-        message_limit=15  # 기본 무료 플랜 제한
+        renewal_date=get_kr_time() + timedelta(days=30),
+        group_usage={
+            "basic_chat": 0,
+            "normal_analysis": 0,
+            "advanced_analysis": 0
+        }
     )
     db.add(subscription)
     
@@ -53,7 +59,7 @@ def create_user(db: Session, *, obj_in: UserCreate) -> User:
 
 def update_password_reset_token(db: Session, user: User, token: str) -> User:
     user.reset_password_token = token
-    user.reset_password_token_expires = datetime.utcnow() + timedelta(hours=24)
+    user.reset_password_token_expires = get_kr_time() + timedelta(hours=24)
     db.commit()
     db.refresh(user)
     return user
@@ -97,15 +103,20 @@ def create_social_user(
     db.add(db_user)
     db.flush()  # 사용자 ID를 얻기 위해 flush
 
-    # 기본 구독 정보 생성
+    # 기본 구독 정보 생성 (새로운 그룹 기반 시스템)
     subscription = Subscription(
         user_id=db_user.id,
         plan=SubscriptionPlan.FREE,
         status="active",
-        start_date=datetime.utcnow(),
+        start_date=get_kr_time(),
+        end_date=get_kr_time() + timedelta(days=30),
         auto_renew=True,
-        message_count=0,
-        message_limit=15  # 기본 무료 플랜 제한
+        renewal_date=get_kr_time() + timedelta(days=30),
+        group_usage={
+            "basic_chat": 0,
+            "normal_analysis": 0,
+            "advanced_analysis": 0
+        }
     )
     db.add(subscription)
     

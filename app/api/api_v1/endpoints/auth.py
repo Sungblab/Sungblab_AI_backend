@@ -2,7 +2,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from app.core.config import settings
 from app.core import security
@@ -10,9 +10,9 @@ from app.core.security import get_current_user
 from app.core.oauth2 import verify_google_token
 from app.db.session import get_db
 from app.schemas.auth import Token, UserCreate, User, SocialLogin, GoogleUser
-from app.crud import crud_user
+from app.crud import crud_user, crud_email_verification
 from app.api import deps
-from app.core.email import send_reset_password_email
+from app.core.email import send_reset_password_email, send_verification_email
 from app.models.user import AuthProvider
 from typing import Optional
 import secrets
@@ -23,16 +23,41 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+class EmailVerificationRequest(BaseModel):
+    email: EmailStr
+
+class EmailVerificationCodeRequest(BaseModel):
+    email: EmailStr
+    verification_code: str
+
 @router.post("/signup", response_model=User)
 def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
+    """
+    일반 회원가입
+    """
+    # 이미 가입된 이메일인지 확인
     user = crud_user.get_user_by_email(db, email=user_in.email)
     if user:
         raise HTTPException(
             status_code=400,
-            detail="이미 등록된 이메일입니다."
+            detail="이미 가입된 이메일입니다.",
         )
-    user = crud_user.create_user(db, obj_in=user_in)
-    return user
+    
+    # 이메일 인증 여부 확인
+    if not crud_email_verification.is_email_verified(db, user_in.email):
+        raise HTTPException(
+            status_code=400,
+            detail="이메일 인증이 필요합니다.",
+        )
+    
+    try:
+        user = crud_user.create_user(db, obj_in=user_in)
+        return user
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
 
 @router.post("/login", response_model=Token)
 def login(
@@ -209,4 +234,44 @@ async def google_auth(
         raise HTTPException(
             status_code=400,
             detail=str(e)
-        ) 
+        )
+
+@router.post("/send-verification", response_model=dict)
+def send_verification(
+    request: EmailVerificationRequest,
+    db: Session = Depends(deps.get_db),
+) -> dict:
+    """
+    회원가입을 위한 이메일 인증 코드 전송
+    """
+    # 이미 가입된 이메일인지 확인
+    user = crud_user.get_user_by_email(db, email=request.email)
+    if user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 가입된 이메일입니다.",
+        )
+    
+    # 인증 코드 생성 및 저장
+    verification = crud_email_verification.create_email_verification(db, request.email)
+    
+    # 이메일 전송
+    send_verification_email(request.email, verification.verification_code)
+    
+    return {"message": "인증 코드가 이메일로 전송되었습니다."}
+
+@router.post("/verify-email", response_model=dict)
+def verify_email(
+    request: EmailVerificationCodeRequest,
+    db: Session = Depends(deps.get_db),
+) -> dict:
+    """
+    이메일 인증 코드 확인
+    """
+    if not crud_email_verification.verify_email_code(db, request.email, request.verification_code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="잘못된 인증 코드이거나 만료되었습니다.",
+        )
+    
+    return {"message": "이메일 인증이 완료되었습니다."} 

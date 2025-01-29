@@ -4,6 +4,14 @@ from app.core.config import settings
 from app.api.api_v1.api import api_router
 from app.db.init_db import init_db
 import logging
+import pytz
+from datetime import datetime
+import os
+
+# 한국 시간대 설정
+os.environ['TZ'] = 'Asia/Seoul'
+KST = pytz.timezone('Asia/Seoul')
+datetime.now(KST)  # 시스템 전체 시간대 설정
 
 # 로깅 설정
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -24,7 +32,6 @@ app = FastAPI(
 # CORS 설정
 origins = [
     "http://localhost:3000",
-    "http://localhost:8000",
     "https://sungblab.com",
     "https://www.sungblab.com",
     "https://sungblab-ai-frontend.vercel.app"

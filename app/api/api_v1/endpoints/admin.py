@@ -7,9 +7,11 @@ from app.models.user import User
 from app.schemas.admin import UserResponse, UserUpdate
 from app.crud import crud_user
 from app.crud import crud_project
-from app.models.subscription import Subscription, SubscriptionPlan
+from app.crud import crud_subscription
+from app.models.subscription import Subscription, SubscriptionPlan, KST
 from datetime import datetime, timedelta
 from pydantic import BaseModel
+from app.core.utils import get_kr_time
 
 router = APIRouter()
 
@@ -130,44 +132,37 @@ def get_subscriptions(
 # 요청 데이터 모델 추가
 class SubscriptionUpdate(BaseModel):
     plan: SubscriptionPlan
+    update_limits: bool = True
 
 @router.patch("/subscriptions/{user_id}")
 def update_subscription(
     user_id: str,
-    update_data: SubscriptionUpdate,  # 요청 데이터 모델 사용
+    update_data: SubscriptionUpdate,
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin)
 ):
     """사용자의 구독 플랜을 변경합니다."""
-    subscription = db.query(Subscription).filter(Subscription.user_id == user_id).first()
-    if not subscription:
+    updated_subscription = crud_subscription.update_subscription_plan(
+        db=db,
+        user_id=user_id,
+        plan=update_data.plan,
+        update_limits=update_data.update_limits
+    )
+    
+    if not updated_subscription:
         raise HTTPException(status_code=404, detail="구독 정보를 찾을 수 없습니다.")
     
-    # 플랜별 메시지 제한 설정
-    message_limits = {
-        SubscriptionPlan.FREE: 15,
-        SubscriptionPlan.BASIC: 200,
-        SubscriptionPlan.PREMIUM: 500
-    }
-    
-    subscription.plan = update_data.plan
-    subscription.message_limit = message_limits[update_data.plan]
-    subscription.renewal_date = datetime.utcnow() + timedelta(days=30)
-    
-    db.commit()
-    return subscription.to_dict()
+    return updated_subscription.to_dict()
 
-@router.post("/users/{user_id}/reset-messages")
-def reset_message_count(
+@router.post("/users/{user_id}/reset-usage")
+def reset_usage(
     user_id: str,
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin)
 ):
-    """사용자의 메시지 사용량을 초기화합니다."""
-    subscription = db.query(Subscription).filter(Subscription.user_id == user_id).first()
-    if not subscription:
+    """사용자의 사용량을 초기화합니다."""
+    updated_subscription = crud_subscription.reset_usage(db=db, user_id=user_id)
+    if not updated_subscription:
         raise HTTPException(status_code=404, detail="구독 정보를 찾을 수 없습니다.")
     
-    subscription.message_count = 0
-    db.commit()
-    return {"message": "메시지 사용량이 초기화되었습니다."} 
+    return updated_subscription.to_dict() 

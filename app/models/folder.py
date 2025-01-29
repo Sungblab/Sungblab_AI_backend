@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, Integer, ForeignKey
 from sqlalchemy.orm import relationship
-from app.models.base import Base
+from app.db.base_class import Base
 
 class Folder(Base):
     name = Column(String, nullable=False)

@@ -93,7 +93,6 @@ def change_password(
     현재 로그인한 사용자의 비밀번호를 변경합니다.
     """
     try:
-        print(f"Auth provider: {current_user.auth_provider}")
         
         # 소셜 로그인 사용자는 비밀번호 변경 불가
         if current_user.auth_provider != "LOCAL":
@@ -102,16 +101,13 @@ def change_password(
                 detail="소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다."
             )
 
-        print("Verifying current password...")
         # 현재 비밀번호 확인
         if not verify_password(password_data.current_password, current_user.hashed_password):
-            print("Current password verification failed")
             raise HTTPException(
                 status_code=400,
                 detail="현재 비밀번호가 일치하지 않습니다."
             )
 
-        print("Updating password...")
         # 새 비밀번호 해시화 및 저장
         user = crud_user.get_user(db, id=current_user.id)
         user.hashed_password = get_password_hash(password_data.new_password)
@@ -120,7 +116,6 @@ def change_password(
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"Unexpected error in change_password: {str(e)}")
         import traceback
         traceback.print_exc()
         db.rollback()

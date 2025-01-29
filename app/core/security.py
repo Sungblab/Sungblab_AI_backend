@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 import bcrypt  # bcrypt 직접 사용
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from app.core.utils import get_kr_time
 
 from app.core.config import settings
 from app.db.session import get_db
@@ -33,9 +34,9 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = get_kr_time() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(
+        expire = get_kr_time() + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
     to_encode = {"exp": expire, "sub": str(subject)}
