@@ -139,7 +139,7 @@ DETAILED_SYSTEM_PROMPT = """[역할 & 목적]
 # DeepSeek Chat 모델용 시스템 프롬프트
 DEEPSEEK_CHAT_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
 불확실한 내용이 있다면 추가 확인을 요청하세요.
-LaTeX 사용시 모든 수학 수식을 달러 기호($)로 감싸서 표현하세요."""
+LaTeX 사용시 무조건 모든 수학 수식마다 달러 기호($)로 감싸서 표현하세요."""
 
 # 토큰 카운팅 관련 함수들
 @lru_cache(maxsize=1000)
