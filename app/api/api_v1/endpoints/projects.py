@@ -105,6 +105,8 @@ ALLOWED_MODELS = [
     "claude-3-5-haiku-20241022",
     "sonar-pro",
     "sonar",
+    "sonar-reasoning-pro",
+    "sonar-reasoning",
     "deepseek-reasoner"
 ]
 MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
