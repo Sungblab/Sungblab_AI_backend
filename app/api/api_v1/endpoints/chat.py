@@ -40,6 +40,8 @@ client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 TOKEN_ENCODINGS = {
     "sonar-pro": "cl100k_base",
     "sonar": "cl100k_base",
+    "sonar-reasoning-pro": "cl100k_base",
+    "sonar-reasoning": "cl100k_base",
     "deepseek-reasoner": "cl100k_base",
     "deepseek-chat": "cl100k_base"
 }
@@ -96,13 +98,15 @@ ALLOWED_MODELS = [
     "claude-3-5-haiku-20241022",
     "sonar-pro",
     "sonar",
+    "sonar-reasoning-pro", 
+    "sonar-reasoning",
     "deepseek-reasoner",
     "deepseek-chat"
 ]
 MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
 
 # Sonar 관련 상수 추가
-SONAR_MODELS = ["sonar-pro", "sonar"]
+SONAR_MODELS = ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning"]
 SONAR_API_URL = "https://api.perplexity.ai/chat/completions"
 ALL_ALLOWED_MODELS = ALLOWED_MODELS + SONAR_MODELS
 

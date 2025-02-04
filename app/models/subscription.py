@@ -54,9 +54,11 @@ MODEL_GROUP_MAPPING = {
     "claude-3-5-haiku-20241022": ModelGroup.BASIC_CHAT,
     "deepseek-chat": ModelGroup.BASIC_CHAT,
     "sonar": ModelGroup.NORMAL_ANALYSIS,
+    "sonar-reasoning": ModelGroup.NORMAL_ANALYSIS,  # 일반 분석 그룹에 추가
     "deepseek-reasoner": ModelGroup.NORMAL_ANALYSIS,
     "claude-3-5-sonnet-20241022": ModelGroup.ADVANCED_ANALYSIS,
     "sonar-pro": ModelGroup.ADVANCED_ANALYSIS,
+    "sonar-reasoning-pro": ModelGroup.ADVANCED_ANALYSIS,  # 고급 분석 그룹에 추가
 }
 
 class Subscription(Base):
