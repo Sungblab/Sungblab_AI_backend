@@ -86,6 +86,8 @@ class ChatRequest(BaseModel):
         "claude-3-5-haiku-20241022",
         "sonar-pro",
         "sonar",
+        "sonar-reasoning-pro",
+        "sonar-reasoning",
         "deepseek-reasoner",
         "deepseek-chat"
     ] = "claude-3-5-haiku-20241022"
