@@ -108,7 +108,7 @@ ALL_ALLOWED_MODELS = ALLOWED_MODELS + SONAR_MODELS
 
 # Sonar 기본 설정
 SONAR_DEFAULT_CONFIG = {
-    "temperature": 0.2,
+    "temperature": 0.5,
     "top_p": 0.9,
     "frequency_penalty": 1,
     "presence_penalty": 0,
@@ -123,8 +123,7 @@ MAX_IMAGE_DIMENSION = 8000
 # 시스템 프롬프트 상수 정의
 BRIEF_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
 답변은 적절한 마크다운을 적용해 주세요
-답변을 풀어서 종결어미로 답하세요. 
-불확실시 추가 확인 요청"""
+답변 형식은 '설명적'으로 요약하지 말고 풀어서 종결어미로 답하세요. """
 
 DETAILED_SYSTEM_PROMPT = """[역할 & 목적]
 - 수행평가 과제(보고서/발표) 작성 지원
@@ -138,8 +137,7 @@ DETAILED_SYSTEM_PROMPT = """[역할 & 목적]
 
 # DeepSeek Chat 모델용 시스템 프롬프트
 DEEPSEEK_CHAT_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
-불확실한 내용이 있다면 추가 확인을 요청하세요.
-LaTeX 사용시 무조건 모든 수학 수식마다 달러 기호($)로 감싸서 표현하세요."""
+LaTeX 사용시 무조건 모든 수학 수식마다 빠지지 않고 달러 기호($)로 감싸서 표현하세요."""
 
 # 토큰 카운팅 관련 함수들
 @lru_cache(maxsize=1000)
