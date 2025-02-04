@@ -25,11 +25,9 @@ from io import BytesIO
 # 기본 시스템 프롬프트 (공통)
 BRIEF_SYSTEM_PROMPT = {
     "type": "text",
-    "text": """당신은 학생을 위한 Sungblab AI 입니다.
-답변을 풀어서 종결어미로 답하세요. 
+    "text": """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
 답변은 적절한 마크다운을 적용해 주세요
-- 단계별 사고과정을 안내하여 스스로 생각 유도
-- 불확실한 내용은 추가 확인""",
+답변 형식은 '설명적'으로 요약하지 말고 풀어서 종결어미로 답하세요.""",
     "cache_control": {"type": "ephemeral"}
 }
 
