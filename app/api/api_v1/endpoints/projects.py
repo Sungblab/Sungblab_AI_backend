@@ -15,12 +15,15 @@ from app.models.user import User
 import json
 from anthropic import AsyncAnthropic
 from app.core.config import settings
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import io
 import base64
 import PyPDF2
 from PIL import Image
 from io import BytesIO
+from openai import AsyncOpenAI
+import google.generativeai as genai
+import asyncio
 
 # 기본 시스템 프롬프트 (공통)
 BRIEF_SYSTEM_PROMPT = {
@@ -107,12 +110,49 @@ ALLOWED_MODELS = [
     "sonar",
     "sonar-reasoning-pro",
     "sonar-reasoning",
-    "deepseek-reasoner"
+    "deepseek-reasoner",
+    "deepseek-chat",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-thinking-exp-01-21"
 ]
 MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
 MAX_FILE_SIZE = 32 * 1024 * 1024  # 32MB
 MAX_PDF_PAGES = 100
 MAX_IMAGE_DIMENSION = 8000
+
+# DeepSeek 관련 설정 추가
+DEEPSEEK_MODELS = ["deepseek-reasoner", "deepseek-chat"]
+DEEPSEEK_DEFAULT_CONFIG = {
+    "deepseek-reasoner": {
+        "temperature": 0.7,
+        "max_tokens": 2048,
+        "top_p": 0.95,
+        "stream": True
+    },
+    "deepseek-chat": {
+        "temperature": 0.7,
+        "max_tokens": 2048,
+        "top_p": 0.95,
+        "stream": True
+    }
+}
+
+# Gemini 관련 설정 추가
+GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-thinking-exp-01-21"]
+GEMINI_DEFAULT_CONFIG = {
+    "gemini-2.0-flash": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+    },
+    "gemini-2.0-flash-thinking-exp-01-21": {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 4096,
+    }
+}
 
 class ChatRequest(BaseModel):
     model: str
@@ -431,8 +471,96 @@ async def stream_project_chat(
     try:
         request_data = json.loads(request)
         
+        # DeepSeek 모델인 경우
+        if request_data["model"] in DEEPSEEK_MODELS:
+            # 프로젝트 정보 가져오기
+            project = crud_project.get(db=db, id=project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            
+            # 첫 메시지 여부 확인
+            is_first_message = len(request_data["messages"]) <= 1
+            
+            # 시스템 프롬프트 생성
+            system_prompt = get_system_prompts(project.type, is_first_message)
+            
+            # 메시지 리스트의 시작에 시스템 프롬프트 추가
+            messages = [
+                {"role": "system", "content": system_prompt}
+            ] + request_data["messages"]
+            
+            # 사용자 메시지 저장
+            user_message = {
+                "content": messages[-1]["content"] if messages else "",
+                "role": "user",
+                "files": None,
+                "citations": None,
+                "reasoning_content": None,
+                "thought_time": None
+            }
+            
+            crud_project.create_chat_message(
+                db=db,
+                project_id=project_id,
+                chat_id=chat_id,
+                obj_in=ChatMessageCreate(**user_message)
+            )
+            
+            return StreamingResponse(
+                generate_deepseek_stream_response(
+                    messages=messages,  # 시스템 프롬프트가 포함된 메시지 전달
+                    model=request_data["model"],
+                    room_id=chat_id,
+                    db=db,
+                    user_id=current_user.id
+                ),
+                media_type="text/event-stream"
+            )
+
+        # Gemini 모델인 경우
+        elif request_data["model"] in GEMINI_MODELS:
+            # 프로젝트 정보 가져오기
+            project = crud_project.get(db=db, id=project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            
+            # 첫 메시지 여부 확인
+            is_first_message = len(request_data["messages"]) <= 1
+            
+            # 시스템 프롬프트 생성
+            system_prompt = BRIEF_SYSTEM_PROMPT["text"]
+            prompt = f"{system_prompt}\n\n사용자: {request_data['messages'][-1]['content'] if request_data['messages'] else ''}"
+            
+            # 사용자 메시지 저장
+            user_message = {
+                "content": request_data["messages"][-1]["content"] if request_data["messages"] else "",
+                "role": "user",
+                "files": None,
+                "citations": None,
+                "reasoning_content": None,
+                "thought_time": None
+            }
+            
+            crud_project.create_chat_message(
+                db=db,
+                project_id=project_id,
+                chat_id=chat_id,
+                obj_in=ChatMessageCreate(**user_message)
+            )
+            
+            return StreamingResponse(
+                generate_gemini_stream_response(
+                    messages=[{"role": "user", "content": prompt}],  # 결합된 프롬프트 전달
+                    model=request_data["model"],
+                    room_id=chat_id,
+                    db=db,
+                    user_id=current_user.id
+                ),
+                media_type="text/event-stream"
+            )
+
         # Sonar 모델인 경우
-        if request_data["model"] in ["sonar-pro", "sonar"]:
+        elif request_data["model"] in ["sonar-pro", "sonar"]:
             # 사용자 메시지 먼저 저장
             user_message = {
                 "content": request_data["messages"][-1]["content"] if request_data["messages"] else "",
@@ -708,10 +836,20 @@ def delete_project_chat(
     
     return {"message": "Chat deleted successfully"}
 
+def get_kr_time() -> datetime:
+    """한국 시간을 반환하는 함수"""
+    utc_time = datetime.now(timezone.utc)
+    kr_timezone = timezone(timedelta(hours=9))
+    return utc_time.astimezone(kr_timezone)
+
 def create_message(db: Session, room_id: str, message: ChatMessageCreate) -> ChatMessage:
     try:
         current_time = get_kr_time()
+        # 현재 시간을 밀리초 단위로 변환하여 ID로 사용
+        message_id = int(current_time.timestamp() * 1000)
+        
         db_message = ChatMessage(
+            id=message_id,  # ID 필드 추가
             room_id=room_id,
             content=message.content,
             role=message.role,
@@ -722,10 +860,152 @@ def create_message(db: Session, room_id: str, message: ChatMessageCreate) -> Cha
             created_at=current_time,
             updated_at=current_time
         )
-        db.add(db_message)  # 데이터베이스에 추가
-        db.commit()         # 변경사항 커밋
-        db.refresh(db_message)  # 객체 새로고침
+        db.add(db_message)
+        db.commit()
+        db.refresh(db_message)
         return db_message
     except Exception as e:
-        db.rollback()  # 에러 시 롤백
+        db.rollback()
         raise
+
+def get_deepseek_client():
+    """DeepSeek 클라이언트를 생성하는 함수"""
+    api_key = settings.DEEPSEEK_API_KEY
+    if not api_key:
+        return None
+    try:
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com"
+        )
+        return client
+    except Exception as e:
+        return None
+
+def get_gemini_client():
+    """Gemini 클라이언트를 생성하는 함수"""
+    api_key = settings.GEMINI_API_KEY
+    if not api_key:
+        return None
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-2.0-flash",
+            generation_config=GEMINI_DEFAULT_CONFIG["gemini-2.0-flash"]
+        )
+        return model
+    except Exception as e:
+        return None
+
+# 시스템 프롬프트 처리 함수 추가
+def get_system_prompts(project_type: str = None, is_first_message: bool = False) -> str:
+    """프로젝트 타입과 메시지 순서에 따른 시스템 프롬프트 생성"""
+    prompts = [BRIEF_SYSTEM_PROMPT["text"]]
+    
+    if is_first_message and project_type:
+        if project_type == "assignment":
+            prompts.append(ASSIGNMENT_PROMPT["text"])
+        elif project_type == "record":
+            prompts.append(RECORD_PROMPT["text"])
+            
+    return "\n\n".join(prompts)
+
+# count_gemini_tokens 함수 추가
+async def count_gemini_tokens(text: str, model: str, gemini_model) -> dict:
+    """Gemini 모델의 토큰 수를 계산합니다."""
+    try:
+        # 입력 토큰 수 계산
+        input_tokens = gemini_model.count_tokens(text).total_tokens
+        return {
+            "input_tokens": input_tokens,
+            "total_tokens": input_tokens
+        }
+    except Exception as e:
+        print(f"Error counting Gemini tokens: {e}")
+        return {
+            "input_tokens": 0,
+            "total_tokens": 0
+        }
+
+# Gemini 스트리밍 응답 생성 함수 수정
+async def generate_gemini_stream_response(messages, model, room_id, db, user_id):
+    try:
+        # Gemini 클라이언트 생성
+        gemini_model = get_gemini_client()
+        if not gemini_model:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API key is not configured"
+            )
+
+        # 프로젝트 ID와 채팅 ID 추출 (room_id는 chat_id와 동일)
+        project = crud_project.get_project_by_chat_id(db, room_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        project_id = project.id
+        chat_id = room_id
+
+        # 마지막 메시지 내용 가져오기
+        last_message = messages[-1]["content"] if messages else ""
+        
+        # 시스템 프롬프트와 사용자 메시지 결합
+        system_prompt = BRIEF_SYSTEM_PROMPT["text"]
+        prompt = f"{system_prompt}\n\n사용자: {last_message}"
+        
+        # 입력 토큰 계산
+        token_count = await count_gemini_tokens(prompt, model, gemini_model)
+        input_tokens = token_count["input_tokens"]
+
+        # 스트리밍 응답 생성
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=GEMINI_DEFAULT_CONFIG[model],
+            stream=True
+        )
+
+        accumulated_content = ""
+        start_time = datetime.now()
+        
+        # Gemini의 청크 처리 (동기 처리)
+        for chunk in response:
+            if hasattr(chunk, 'text'):
+                content_chunk = chunk.text
+                accumulated_content += content_chunk
+                yield f"data: {json.dumps({'content': content_chunk})}\n\n"
+                await asyncio.sleep(0)  # 비동기 컨텍스트 유지
+
+        # 응답 완료 후 메시지 저장
+        if accumulated_content:
+            end_time = datetime.now()
+            thought_time = (end_time - start_time).total_seconds()
+
+            # 토큰 사용량 계산 및 저장
+            output_tokens = len(accumulated_content.split())
+            crud_stats.create_token_usage(
+                db=db,
+                user_id=user_id,
+                room_id=chat_id,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                timestamp=datetime.now()
+            )
+
+            # AI 응답 메시지 저장
+            crud_project.create_chat_message(
+                db=db,
+                project_id=project_id,  # 올바른 project_id 사용
+                chat_id=chat_id,
+                obj_in=ChatMessageCreate(
+                    content=accumulated_content,
+                    role="assistant",
+                    reasoning_content=None,
+                    thought_time=thought_time
+                )
+            )
+
+    except Exception as e:
+        error_message = f"Error in Gemini streaming: {str(e)}"
+        print(error_message)
+        yield f"data: {json.dumps({'error': error_message})}\n\n"

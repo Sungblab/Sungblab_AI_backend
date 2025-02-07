@@ -24,3 +24,4 @@ alembic
 pytz
 openai
 tiktoken
+google-generativeai

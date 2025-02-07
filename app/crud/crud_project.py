@@ -181,3 +181,10 @@ def create_chat_message(
     except Exception as e:
         db.rollback()
         raise 
+
+def get_project_by_chat_id(db: Session, chat_id: str) -> Optional[Project]:
+    """채팅 ID로 프로젝트를 찾는 함수"""
+    chat = db.query(ProjectChat).filter(ProjectChat.id == chat_id).first()
+    if not chat:
+        return None
+    return db.query(Project).filter(Project.id == chat.project_id).first() 

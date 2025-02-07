@@ -23,6 +23,11 @@ def create_token_usage(
     cache_hit_tokens: int = 0
 ) -> TokenUsage:
     """토큰 사용량 기록을 생성합니다."""
+    # Gemini 모델의 경우 토큰 수는 API에서 제공하는 값 사용
+    if model.startswith("gemini-"):
+        # 이미 정확한 토큰 수가 계산되어 전달되었으므로 추가 처리 불필요
+        pass
+    
     db_obj = TokenUsage(
         id=str(uuid.uuid4()),
         user_id=user_id,

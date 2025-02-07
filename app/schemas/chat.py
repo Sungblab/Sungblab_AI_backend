@@ -89,7 +89,11 @@ class ChatRequest(BaseModel):
         "sonar-reasoning-pro",
         "sonar-reasoning",
         "deepseek-reasoner",
-        "deepseek-chat"
+        "deepseek-chat",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite-preview-02-05",
+        "gemini-2.0-pro-exp-02-05",
+        "gemini-2.0-flash-thinking-exp-01-21"
     ] = "claude-3-5-haiku-20241022"
 
 class TokenUsage(BaseModel):

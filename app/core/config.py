@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
 
+    # Gemini API 설정
+    GEMINI_API_KEY: str = ""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         print(f"Environment: {self.ENVIRONMENT}")

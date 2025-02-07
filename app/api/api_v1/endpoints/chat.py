@@ -32,6 +32,7 @@ from openai import AsyncOpenAI
 import time
 import tiktoken
 from functools import lru_cache
+import google.generativeai as genai
 
 router = APIRouter()
 client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -43,7 +44,8 @@ TOKEN_ENCODINGS = {
     "sonar-reasoning-pro": "cl100k_base",
     "sonar-reasoning": "cl100k_base",
     "deepseek-reasoner": "cl100k_base",
-    "deepseek-chat": "cl100k_base"
+    "deepseek-chat": "cl100k_base",
+    "gemini-2.0-flash": "cl100k_base"  # Gemini 모델 토큰 인코딩 추가
 }
 
 # DeepSeek 관련 상수 추가
@@ -93,6 +95,42 @@ def get_deepseek_client():
     except Exception as e:
         return None
 
+# Gemini 관련 상수 업데이트
+GEMINI_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite-preview-02-05",
+    "gemini-2.0-pro-exp-02-05",
+    "gemini-2.0-flash-thinking-exp-01-21"
+]
+
+GEMINI_DEFAULT_CONFIG = {
+    "gemini-2.0-flash": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+    },
+    "gemini-2.0-flash-lite-preview-02-05": {
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 4096,
+    },
+    "gemini-2.0-pro-exp-02-05": {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+    },
+    "gemini-2.0-flash-thinking-exp-01-21": {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 4096,
+    }
+}
+
+# 허용된 모델 리스트 업데이트
 ALLOWED_MODELS = [
     "claude-3-5-sonnet-20241022",
     "claude-3-5-haiku-20241022",
@@ -101,7 +139,8 @@ ALLOWED_MODELS = [
     "sonar-reasoning-pro", 
     "sonar-reasoning",
     "deepseek-reasoner",
-    "deepseek-chat"
+    "deepseek-chat",
+    "gemini-2.0-flash"  # Gemini 모델 추가
 ]
 MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
 
@@ -142,6 +181,14 @@ DETAILED_SYSTEM_PROMPT = """[역할 & 목적]
 # DeepSeek Chat 모델용 시스템 프롬프트
 DEEPSEEK_CHAT_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
 LaTeX 사용시 무조건 모든 수학 수식마다 빠지지 않고 달러 기호($)로 감싸서 표현하세요."""
+
+# Gemini 모델용 시스템 프롬프트 추가
+GEMINI_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
+
+[답변 지침]
+1. 마크다운 형식 사용
+2. 수학 수식은 LaTeX로 표현 ($로 감싸기)
+"""
 
 # 토큰 카운팅 관련 함수들
 @lru_cache(maxsize=1000)
@@ -459,7 +506,7 @@ async def generate_stream_response(
         
         # 모델별 클라이언트 초기화
         model_client = None
-        if request.model not in (SONAR_MODELS + DEEPSEEK_MODELS):
+        if request.model not in (SONAR_MODELS + DEEPSEEK_MODELS + GEMINI_MODELS):
             # Claude 모델을 위한 클라이언트
             model_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
             if not model_client:
@@ -474,6 +521,14 @@ async def generate_stream_response(
                 raise HTTPException(
                     status_code=500,
                     detail="DeepSeek API key is not configured"
+                )
+        elif request.model in GEMINI_MODELS:
+            # Gemini 모델을 위한 클라이언트
+            model_client = get_gemini_client()
+            if not model_client:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Gemini API key is not configured"
                 )
 
         # 메시지 유효성 검사
@@ -497,10 +552,10 @@ async def generate_stream_response(
             )
 
         # 모델 유효성 검사
-        if request.model not in (ALLOWED_MODELS + SONAR_MODELS):
+        if request.model not in (ALLOWED_MODELS + SONAR_MODELS + GEMINI_MODELS):
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid model specified. Allowed models: {ALLOWED_MODELS + SONAR_MODELS}"
+                detail=f"Invalid model specified. Allowed models: {ALLOWED_MODELS + SONAR_MODELS + GEMINI_MODELS}"
             )
 
         # DeepSeek Chat 모델 처리
@@ -620,6 +675,30 @@ async def generate_stream_response(
             ]
             
             async for chunk in generate_sonar_stream_response(
+                messages=messages,
+                model=request.model,
+                room_id=room_id,
+                db=db,
+                user_id=user_id
+            ):
+                yield chunk
+            return
+
+        # Gemini 모델 처리
+        if request.model in GEMINI_MODELS:
+            if file_data_list:  # Gemini는 현재 파일 처리를 지원하지 않음
+                raise HTTPException(
+                    status_code=400,
+                    detail="File upload is not supported for Gemini models"
+                )
+            
+            messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.messages
+                if msg.content and msg.content.strip()
+            ]
+            
+            async for chunk in generate_gemini_stream_response(
                 messages=messages,
                 model=request.model,
                 room_id=room_id,
@@ -1383,3 +1462,116 @@ async def create_project_chat_message(
         db.rollback()
         error_message = f"Error in project chat: {str(e)}"
         raise HTTPException(status_code=500, detail=error_message)
+
+def get_gemini_client():
+    """Gemini 클라이언트를 생성하는 함수"""
+    api_key = settings.GEMINI_API_KEY
+    
+    if not api_key:
+        return None
+        
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(
+            model_name="gemini-2.0-flash",
+            generation_config=GEMINI_DEFAULT_CONFIG["gemini-2.0-flash"]
+        )
+        return model
+    except Exception as e:
+        return None
+
+# Gemini 스트리밍 응답 생성 함수
+async def generate_gemini_stream_response(
+    messages: list,
+    model: str,
+    room_id: str,
+    db: Session,
+    user_id: str
+) -> AsyncGenerator[str, None]:
+    try:
+        # Gemini 클라이언트 생성
+        gemini_model = get_gemini_client()
+        if not gemini_model:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API key is not configured"
+            )
+
+        # 마지막 메시지 내용 가져오기
+        last_message = messages[-1]["content"] if messages else ""
+        
+        # 시스템 프롬프트와 사용자 메시지 결합
+        prompt = f"{GEMINI_SYSTEM_PROMPT}\n\n사용자: {last_message}"
+        
+        # 입력 토큰 계산
+        token_count = await count_gemini_tokens(prompt, model, gemini_model)
+        input_tokens = token_count["input_tokens"]
+
+        # 스트리밍 응답 생성
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=GEMINI_DEFAULT_CONFIG[model],
+            stream=True
+        )
+
+        accumulated_content = ""
+        
+        # Gemini의 청크 처리
+        for chunk in response:
+            if hasattr(chunk, 'text'):
+                content_chunk = chunk.text
+                accumulated_content += content_chunk
+                yield f"data: {json.dumps({'content': content_chunk})}\n\n"
+                await asyncio.sleep(0)  # 비동기 컨텍스트 유지
+
+        # 토큰 사용량 계산 및 저장
+        output_tokens = 0
+        if hasattr(response, 'candidates') and response.candidates:
+            for candidate in response.candidates:
+                if hasattr(candidate, 'token_count'):
+                    output_tokens = candidate.token_count
+                    break
+
+        if not output_tokens:
+            output_tokens = len(accumulated_content.split())
+
+        # 토큰 사용량 저장
+        crud_stats.create_token_usage(
+            db=db,
+            user_id=user_id,
+            room_id=room_id,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            timestamp=datetime.now()
+        )
+
+        # AI 응답 메시지 저장
+        if accumulated_content:
+            message_create = ChatMessageCreate(
+                content=accumulated_content,
+                role="assistant",
+                room_id=room_id
+            )
+            crud_chat.create_message(db, room_id, message_create)
+
+    except Exception as e:
+        error_message = f"Gemini API Error: {str(e)}"
+        yield f"data: {json.dumps({'error': error_message})}\n\n"
+
+# Gemini 토큰 카운팅 함수 추가
+async def count_gemini_tokens(text: str, model: str, gemini_model) -> dict:
+    """Gemini 모델의 토큰 수를 계산합니다."""
+    try:
+        # 입력 토큰 수 계산
+        input_tokens = gemini_model.count_tokens(text).total_tokens
+        return {
+            "input_tokens": input_tokens,
+            "total_tokens": input_tokens
+        }
+    except Exception as e:
+        print(f"Error counting Gemini tokens: {e}")
+        return {
+            "input_tokens": 0,
+            "total_tokens": 0
+        }

@@ -48,6 +48,10 @@ class AIModel(str, enum.Enum):
     SONAR = "sonar"
     DEEPSEEK_REASONER = "deepseek-reasoner"
     DEEPSEEK_CHAT = "deepseek-chat"
+    GEMINI_FLASH = "gemini-2.0-flash"
+    GEMINI_FLASH_LITE = "gemini-2.0-flash-lite-preview-02-05"
+    GEMINI_PRO = "gemini-2.0-pro-exp-02-05"
+    GEMINI_FLASH_THINKING = "gemini-2.0-flash-thinking-exp-01-21"
 
 # 모델 그룹 매핑
 MODEL_GROUP_MAPPING = {
@@ -59,6 +63,10 @@ MODEL_GROUP_MAPPING = {
     "claude-3-5-sonnet-20241022": ModelGroup.ADVANCED_ANALYSIS,
     "sonar-pro": ModelGroup.ADVANCED_ANALYSIS,
     "sonar-reasoning-pro": ModelGroup.ADVANCED_ANALYSIS,  # 고급 분석 그룹에 추가
+    "gemini-2.0-flash": ModelGroup.BASIC_CHAT,  # Gemini를 기본 채팅 그룹에 추가
+    "gemini-2.0-flash-lite-preview-02-05": ModelGroup.BASIC_CHAT,
+    "gemini-2.0-pro-exp-02-05": ModelGroup.ADVANCED_ANALYSIS,
+    "gemini-2.0-flash-thinking-exp-01-21": ModelGroup.NORMAL_ANALYSIS,
 }
 
 class Subscription(Base):
