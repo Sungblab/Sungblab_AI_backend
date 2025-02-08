@@ -1497,11 +1497,15 @@ async def generate_gemini_stream_response(
                 detail="Gemini API key is not configured"
             )
 
-        # 마지막 메시지 내용 가져오기
-        last_message = messages[-1]["content"] if messages else ""
-        
-        # 시스템 프롬프트와 사용자 메시지 결합
-        prompt = f"{GEMINI_SYSTEM_PROMPT}\n\n사용자: {last_message}"
+        # 대화 기록을 포함한 프롬프트 구성
+        conversation_history = []
+        for msg in messages:
+            role = "시스템" if msg["role"] == "system" else "사용자" if msg["role"] == "user" else "어시스턴트"
+            conversation_history.append(f"{role}: {msg['content']}")
+
+        # 시스템 프롬프트와 대화 기록 결합
+        prompt = f"{GEMINI_SYSTEM_PROMPT}\n\n"
+        prompt += "\n".join(conversation_history[-5:])  # 최근 5개의 메시지만 포함
         
         # 입력 토큰 계산
         token_count = await count_gemini_tokens(prompt, model, gemini_model)
@@ -1522,7 +1526,7 @@ async def generate_gemini_stream_response(
                 content_chunk = chunk.text
                 accumulated_content += content_chunk
                 yield f"data: {json.dumps({'content': content_chunk})}\n\n"
-                await asyncio.sleep(0)  # 비동기 컨텍스트 유지
+                await asyncio.sleep(0.01)  # 비동기 컨텍스트 유지를 위한 짧은 대기
 
         # 토큰 사용량 계산 및 저장
         output_tokens = 0
