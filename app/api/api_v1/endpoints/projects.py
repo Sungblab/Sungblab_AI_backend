@@ -946,12 +946,21 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
         project_id = project.id
         chat_id = room_id
 
-        # 마지막 메시지 내용 가져오기
-        last_message = messages[-1]["content"] if messages else ""
-        
-        # 시스템 프롬프트와 사용자 메시지 결합
+        # 대화 기록을 포함한 프롬프트 구성
+        conversation_history = []
+        for msg in messages:
+            role = "시스템" if msg["role"] == "system" else "사용자" if msg["role"] == "user" else "어시스턴트"
+            conversation_history.append(f"{role}: {msg['content']}")
+
+        # 시스템 프롬프트와 대화 기록 결합
         system_prompt = BRIEF_SYSTEM_PROMPT["text"]
-        prompt = f"{system_prompt}\n\n사용자: {last_message}"
+        if project.type == "assignment":
+            system_prompt += "\n\n" + ASSIGNMENT_PROMPT["text"]
+        elif project.type == "record":
+            system_prompt += "\n\n" + RECORD_PROMPT["text"]
+
+        prompt = f"{system_prompt}\n\n"
+        prompt += "\n".join(conversation_history[-5:])  # 최근 5개의 메시지만 포함
         
         # 입력 토큰 계산
         token_count = await count_gemini_tokens(prompt, model, gemini_model)
@@ -967,13 +976,13 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
         accumulated_content = ""
         start_time = datetime.now()
         
-        # Gemini의 청크 처리 (동기 처리)
+        # Gemini의 청크 처리
         for chunk in response:
             if hasattr(chunk, 'text'):
                 content_chunk = chunk.text
                 accumulated_content += content_chunk
                 yield f"data: {json.dumps({'content': content_chunk})}\n\n"
-                await asyncio.sleep(0)  # 비동기 컨텍스트 유지
+                await asyncio.sleep(0.01)  # 비동기 컨텍스트 유지를 위한 짧은 대기
 
         # 응답 완료 후 메시지 저장
         if accumulated_content:
@@ -995,7 +1004,7 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
             # AI 응답 메시지 저장
             crud_project.create_chat_message(
                 db=db,
-                project_id=project_id,  # 올바른 project_id 사용
+                project_id=project_id,
                 chat_id=chat_id,
                 obj_in=ChatMessageCreate(
                     content=accumulated_content,
