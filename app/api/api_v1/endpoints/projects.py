@@ -928,7 +928,13 @@ async def count_gemini_tokens(text: str, model: str, gemini_model) -> dict:
         }
 
 # Gemini 스트리밍 응답 생성 함수 수정
-async def generate_gemini_stream_response(messages, model, room_id, db, user_id):
+async def generate_gemini_stream_response(
+    messages: list,
+    model: str,
+    room_id: str,
+    db: Session,
+    user_id: str
+) -> AsyncGenerator[str, None]:
     try:
         # Gemini 클라이언트 생성
         gemini_model = get_gemini_client()
@@ -938,7 +944,7 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
                 detail="Gemini API key is not configured"
             )
 
-        # 프로젝트 ID와 채팅 ID 추출 (room_id는 chat_id와 동일)
+        # 프로젝트 정보 가져오기
         project = crud_project.get_project_by_chat_id(db, room_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -948,26 +954,30 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
 
         # 대화 기록을 포함한 프롬프트 구성
         conversation_history = []
-        for msg in messages:
+        for msg in messages[-5:]:  # 최근 5개 메시지만 사용
             role = "시스템" if msg["role"] == "system" else "사용자" if msg["role"] == "user" else "어시스턴트"
-            conversation_history.append(f"{role}: {msg['content']}")
+            conversation_history.append({
+                "role": role,
+                "parts": [msg["content"]]
+            })
 
-        # 시스템 프롬프트와 대화 기록 결합
+        # 시스템 프롬프트 구성
         system_prompt = BRIEF_SYSTEM_PROMPT["text"]
         if project.type == "assignment":
             system_prompt += "\n\n" + ASSIGNMENT_PROMPT["text"]
         elif project.type == "record":
             system_prompt += "\n\n" + RECORD_PROMPT["text"]
 
-        prompt = f"{system_prompt}\n\n"
-        prompt += "\n".join(conversation_history[-5:])  # 최근 5개의 메시지만 포함
+        # Gemini 채팅 세션 생성
+        chat = gemini_model.start_chat(history=conversation_history)
         
         # 입력 토큰 계산
+        prompt = f"{system_prompt}\n\n{messages[-1]['content']}"
         token_count = await count_gemini_tokens(prompt, model, gemini_model)
         input_tokens = token_count["input_tokens"]
 
         # 스트리밍 응답 생성
-        response = gemini_model.generate_content(
+        response = chat.send_message(
             prompt,
             generation_config=GEMINI_DEFAULT_CONFIG[model],
             stream=True
@@ -982,7 +992,7 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
                 content_chunk = chunk.text
                 accumulated_content += content_chunk
                 yield f"data: {json.dumps({'content': content_chunk})}\n\n"
-                await asyncio.sleep(0.01)  # 비동기 컨텍스트 유지를 위한 짧은 대기
+                await asyncio.sleep(0.01)
 
         # 응답 완료 후 메시지 저장
         if accumulated_content:
@@ -998,7 +1008,8 @@ async def generate_gemini_stream_response(messages, model, room_id, db, user_id)
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
+                chat_type=f"project_{project.type}" if project.type else None
             )
 
             # AI 응답 메시지 저장
