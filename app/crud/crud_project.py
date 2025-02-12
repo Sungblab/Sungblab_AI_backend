@@ -14,10 +14,8 @@ MODEL_GROUP_MAPPING = {
     "claude-3-5-haiku-20241022": "claude",
     "sonar-pro": "sonar",
     "sonar": "sonar",
-    "sonar-reasoning-pro": "sonar",
     "sonar-reasoning": "sonar",
     "deepseek-reasoner": "deepseek",
-    "deepseek-chat": "deepseek"
 }
 
 def create(db: Session, *, obj_in: ProjectCreate, user_id: str) -> Project:

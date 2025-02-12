@@ -41,23 +41,15 @@ client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 TOKEN_ENCODINGS = {
     "sonar-pro": "cl100k_base",
     "sonar": "cl100k_base",
-    "sonar-reasoning-pro": "cl100k_base",
     "sonar-reasoning": "cl100k_base",
     "deepseek-reasoner": "cl100k_base",
-    "deepseek-chat": "cl100k_base",
     "gemini-2.0-flash": "cl100k_base"  # Gemini 모델 토큰 인코딩 추가
 }
 
 # DeepSeek 관련 상수 추가
-DEEPSEEK_MODELS = ["deepseek-reasoner", "deepseek-chat"]
+DEEPSEEK_MODELS = ["deepseek-reasoner"]
 DEEPSEEK_DEFAULT_CONFIG = {
     "deepseek-reasoner": {
-        "temperature": 0.7,
-        "max_tokens": 2048,
-        "top_p": 0.95,
-        "stream": True
-    },
-    "deepseek-chat": {
         "temperature": 0.7,
         "max_tokens": 2048,
         "top_p": 0.95,
@@ -68,11 +60,6 @@ DEEPSEEK_DEFAULT_CONFIG = {
 # DeepSeek 토큰 제한
 DEEPSEEK_MAX_TOKENS = {
     "deepseek-reasoner": {
-        "max_total_tokens": 16384,
-        "max_input_tokens": 8192,
-        "max_output_tokens": 8192
-    },
-    "deepseek-chat": {
         "max_total_tokens": 16384,
         "max_input_tokens": 8192,
         "max_output_tokens": 8192
@@ -98,9 +85,6 @@ def get_deepseek_client():
 # Gemini 관련 상수 업데이트
 GEMINI_MODELS = [
     "gemini-2.0-flash",
-    "gemini-2.0-flash-lite-preview-02-05",
-    "gemini-2.0-pro-exp-02-05",
-    "gemini-2.0-flash-thinking-exp-01-21"
 ]
 
 GEMINI_DEFAULT_CONFIG = {
@@ -109,24 +93,6 @@ GEMINI_DEFAULT_CONFIG = {
         "top_p": 0.95,
         "top_k": 40,
         "max_output_tokens": 8192,
-    },
-    "gemini-2.0-flash-lite-preview-02-05": {
-        "temperature": 0.9,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 4096,
-    },
-    "gemini-2.0-pro-exp-02-05": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 8192,
-    },
-    "gemini-2.0-flash-thinking-exp-01-21": {
-        "temperature": 0.8,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 4096,
     }
 }
 
@@ -136,16 +102,14 @@ ALLOWED_MODELS = [
     "claude-3-5-haiku-20241022",
     "sonar-pro",
     "sonar",
-    "sonar-reasoning-pro", 
     "sonar-reasoning",
     "deepseek-reasoner",
-    "deepseek-chat",
     "gemini-2.0-flash"  # Gemini 모델 추가
 ]
 MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
 
 # Sonar 관련 상수 추가
-SONAR_MODELS = ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning"]
+SONAR_MODELS = ["sonar-pro", "sonar", "sonar-reasoning"]
 SONAR_API_URL = "https://api.perplexity.ai/chat/completions"
 ALL_ALLOWED_MODELS = ALLOWED_MODELS + SONAR_MODELS
 
@@ -165,13 +129,9 @@ MAX_IMAGE_DIMENSION = 8000
 
 # 시스템 프롬프트 상수 정의
 BRIEF_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
-답변은 적절한 마크다운을 적용해 주세요
-답변 형식은 '설명적'으로 요약하지 말고 풀어서 종결어미로 답하세요."""
+LaTeX 사용시 모든 수학 수식마다 달러 기호($)로 감싸서 표현하세요."""
 
-DETAILED_SYSTEM_PROMPT = """[역할 & 목적]
-- 수행평가 과제(보고서/발표) 작성 지원
-- 생기부(세특) 작성 가이드
-- 학습 관련 질문 해결 및 심화 학습 유도
+DETAILED_SYSTEM_PROMPT = """
 [행동 지침]
 - 학생 수준에 따라 설명과 예시
 - 자기주도적 탐구 유도
@@ -180,13 +140,12 @@ DETAILED_SYSTEM_PROMPT = """[역할 & 목적]
 
 # DeepSeek Chat 모델용 시스템 프롬프트
 DEEPSEEK_CHAT_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
-LaTeX 사용시 무조건 모든 수학 수식마다 빠지지 않고 달러 기호($)로 감싸서 표현하세요."""
+LaTeX 사용시 모든 수학 수식마다 달러 기호($)로 감싸서 표현하세요."""
 
 # Gemini 모델용 시스템 프롬프트 추가
 GEMINI_SYSTEM_PROMPT = """당신은 학생을 위한 'Sungblab AI' 교육 어시스턴트입니다.
-
 [답변 지침]
-1. 마크다운 형식 사용
+1. 적절한 마크다운 사용
 2. 수학 수식은 LaTeX로 표현 ($로 감싸기)
 """
 
@@ -557,84 +516,6 @@ async def generate_stream_response(
                 status_code=400,
                 detail=f"Invalid model specified. Allowed models: {ALLOWED_MODELS + SONAR_MODELS + GEMINI_MODELS}"
             )
-
-        # DeepSeek Chat 모델 처리
-        if request.model == "deepseek-chat":
-            
-            # 시스템 프롬프트를 메시지 리스트의 첫 번째로 추가
-            messages = [
-                {"role": "system", "content": DEEPSEEK_CHAT_SYSTEM_PROMPT}
-            ] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
-            
-            client = get_deepseek_client()
-            if not client:
-                raise HTTPException(
-                    status_code=500,
-                    detail="DeepSeek API key is not configured"
-                )
-
-            messageId = generateUniqueId()
-            accumulated_content = ""
-            stream = await client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                **DEEPSEEK_DEFAULT_CONFIG[request.model]
-            )
-
-            async for chunk in stream:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if hasattr(delta, 'content') and delta.content:
-                        accumulated_content += delta.content
-                        response_data = {
-                            "id": messageId,
-                            "role": "assistant",
-                            "content": accumulated_content,
-                            "created_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat(),
-                            "room_id": room_id,
-                            "isStreaming": True
-                        }
-                        yield f"data: {json.dumps(response_data)}\n\n"
-
-            # 스트리밍 완료 후 최종 메시지 전송
-            final_response = {
-                "id": messageId,
-                "role": "assistant",
-                "content": accumulated_content,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-                "room_id": room_id,
-                "isStreaming": False
-            }
-            yield f"data: {json.dumps(final_response)}\n\n"
-
-            # 토큰 사용량 저장
-            if accumulated_content:
-                output_tokens = count_tokens_cached(accumulated_content, request.model)
-                input_tokens = count_messages_tokens(messages, request.model)
-                
-                crud_stats.create_token_usage(
-                    db=db,
-                    user_id=user_id,
-                    room_id=room_id,
-                    model=request.model,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    timestamp=datetime.now(),
-                    cache_write_tokens=0,
-                    cache_hit_tokens=0
-                )
-
-                # 메시지 저장 (한 번만)
-                message_create = ChatMessageCreate(
-                    content=accumulated_content,
-                    role="assistant",
-                    room_id=room_id
-                )
-                crud_chat.create_message(db, room_id, message_create)
-
-            return
 
         # DeepSeek 모델 처리
         if request.model in DEEPSEEK_MODELS:

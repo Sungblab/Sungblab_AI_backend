@@ -108,12 +108,9 @@ ALLOWED_MODELS = [
     "claude-3-5-haiku-20241022",
     "sonar-pro",
     "sonar",
-    "sonar-reasoning-pro",
     "sonar-reasoning",
     "deepseek-reasoner",
-    "deepseek-chat",
     "gemini-2.0-flash",
-    "gemini-2.0-flash-thinking-exp-01-21"
 ]
 MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
 MAX_FILE_SIZE = 32 * 1024 * 1024  # 32MB
@@ -121,7 +118,7 @@ MAX_PDF_PAGES = 100
 MAX_IMAGE_DIMENSION = 8000
 
 # DeepSeek 관련 설정 추가
-DEEPSEEK_MODELS = ["deepseek-reasoner", "deepseek-chat"]
+DEEPSEEK_MODELS = ["deepseek-reasoner"]
 DEEPSEEK_DEFAULT_CONFIG = {
     "deepseek-reasoner": {
         "temperature": 0.7,
@@ -129,16 +126,11 @@ DEEPSEEK_DEFAULT_CONFIG = {
         "top_p": 0.95,
         "stream": True
     },
-    "deepseek-chat": {
-        "temperature": 0.7,
-        "max_tokens": 2048,
-        "top_p": 0.95,
-        "stream": True
-    }
+
 }
 
 # Gemini 관련 설정 추가
-GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-thinking-exp-01-21"]
+GEMINI_MODELS = ["gemini-2.0-flash"]
 GEMINI_DEFAULT_CONFIG = {
     "gemini-2.0-flash": {
         "temperature": 1.0,
@@ -146,12 +138,6 @@ GEMINI_DEFAULT_CONFIG = {
         "top_k": 40,
         "max_output_tokens": 8192,
     },
-    "gemini-2.0-flash-thinking-exp-01-21": {
-        "temperature": 0.8,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 4096,
-    }
 }
 
 class ChatRequest(BaseModel):
