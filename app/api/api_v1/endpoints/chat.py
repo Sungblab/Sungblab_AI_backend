@@ -17,7 +17,7 @@ from app.core.config import settings
 import logging
 import asyncio
 import base64
-from typing import Optional, List, AsyncGenerator, Dict, Any, Sequence
+from typing import Optional, List, AsyncGenerator, Dict, Any
 import shutil
 import tempfile
 import os
@@ -33,64 +33,9 @@ import time
 import tiktoken
 from functools import lru_cache
 import google.generativeai as genai
-# LangGraph imports
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_core.runnables import RunnableConfig
-from typing import TypedDict, Union
 
 router = APIRouter()
 client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-class ChatState(TypedDict):
-    """채팅 상태를 정의하는 클래스"""
-    messages: Sequence[BaseMessage]
-    next: Optional[str]
-
-class SharedChatMemory:
-    """모든 모델이 공유하는 대화 메모리 클래스"""
-    _instances: Dict[str, Dict[str, Any]] = {}  # 채팅방 ID별 상태 저장
-
-    @classmethod
-    def get_instance(cls, room_id: str) -> 'SharedChatMemory':
-        """싱글톤 패턴: 채팅방별로 하나의 메모리 인스턴스만 생성"""
-        if room_id not in cls._instances:
-            cls._instances[room_id] = cls(room_id)
-        return cls._instances[room_id]
-
-    def __init__(self, room_id: str):
-        self.room_id = room_id
-        self.state: ChatState = {
-            "messages": [],
-            "next": None
-        }
-        
-    def add_message(self, role: str, content: str):
-        """메시지 추가"""
-        if role == "user":
-            message = HumanMessage(content=content)
-        elif role == "assistant":
-            message = AIMessage(content=content)
-        else:
-            return
-        
-        self.state["messages"] = list(self.state["messages"]) + [message]
-
-    def get_messages(self) -> List[Dict[str, str]]:
-        """현재 메모리의 모든 메시지 반환"""
-        return [
-            {
-                "role": "user" if isinstance(msg, HumanMessage) else "assistant",
-                "content": msg.content
-            }
-            for msg in self.state["messages"]
-        ]
-
-    def clear(self):
-        """메모리 초기화"""
-        self.state["messages"] = []
-        self.state["next"] = None
 
 # 토큰 관련 상수 정의
 TOKEN_ENCODINGS = {
@@ -463,15 +408,13 @@ async def generate_deepseek_stream_response(
         content = ""
         reasoning_content = ""
 
-        # 시스템 프롬프트를 첫 번째 메시지로 추가
-        formatted_messages = [
-            {"role": "system", "content": DEEPSEEK_CHAT_SYSTEM_PROMPT}
-        ]
-        formatted_messages.extend(messages)
+        for msg in messages:
+            print(f"Role: {msg['role']}")
+            print(f"Content: {msg['content']}\n")
 
         stream = await client.chat.completions.create(
             model=model,
-            messages=formatted_messages,
+            messages=messages,
             **DEEPSEEK_DEFAULT_CONFIG[model]
         )
 
@@ -551,18 +494,12 @@ async def generate_stream_response(
     file_names: Optional[List[str]] = None
 ):
     try:
+        # 구독 체크 부분 제거 (이미 create_message에서 체크했음)
         if db and user_id:
+            # subscription 조회만 하고 사용량은 업데이트하지 않음
             subscription = db.query(Subscription).filter(
                 Subscription.user_id == user_id
             ).first()
-
-        # SharedChatMemory 인스턴스 가져오기
-        chat_memory = SharedChatMemory.get_instance(room_id) if room_id else None
-        
-        # 새로운 사용자 메시지를 상태에 추가
-        if chat_memory and request.messages:
-            last_message = request.messages[-1]
-            chat_memory.add_message(last_message.role, last_message.content)
 
         # 요청 시작 시간 기록
         request_start_time = time.time()
@@ -570,6 +507,7 @@ async def generate_stream_response(
         # 모델별 클라이언트 초기화
         model_client = None
         if request.model not in (SONAR_MODELS + DEEPSEEK_MODELS + GEMINI_MODELS):
+            # Claude 모델을 위한 클라이언트
             model_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
             if not model_client:
                 raise HTTPException(
@@ -577,6 +515,7 @@ async def generate_stream_response(
                     detail="Anthropic API key is not configured"
                 )
         elif request.model in DEEPSEEK_MODELS:
+            # DeepSeek 모델을 위한 클라이언트
             model_client = get_deepseek_client()
             if not model_client:
                 raise HTTPException(
@@ -584,6 +523,7 @@ async def generate_stream_response(
                     detail="DeepSeek API key is not configured"
                 )
         elif request.model in GEMINI_MODELS:
+            # Gemini 모델을 위한 클라이언트
             model_client = get_gemini_client()
             if not model_client:
                 raise HTTPException(
@@ -598,15 +538,18 @@ async def generate_stream_response(
                 detail="At least one message is required"
             )
 
-        # 상태에서 이전 대화 컨텍스트 가져오기
-        if chat_memory:
-            previous_messages = chat_memory.get_messages()
-            # 기존 메시지와 새 메시지 결합
-            messages = previous_messages + [{"role": msg.role, "content": msg.content} 
-                                         for msg in request.messages[-1:]]
-        else:
-            messages = [{"role": msg.role, "content": msg.content} 
-                      for msg in request.messages]
+        # 메시지 내용 유효성 검사 및 최적화
+        MAX_MESSAGES = 5  # 최근 5개의 메시지만 유지
+        valid_messages = [
+            msg for msg in request.messages[-MAX_MESSAGES:] 
+            if msg.content and msg.content.strip()
+        ]
+        
+        if len(valid_messages) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid message content found"
+            )
 
         # 모델 유효성 검사
         if request.model not in (ALLOWED_MODELS + SONAR_MODELS + GEMINI_MODELS):
@@ -615,25 +558,98 @@ async def generate_stream_response(
                 detail=f"Invalid model specified. Allowed models: {ALLOWED_MODELS + SONAR_MODELS + GEMINI_MODELS}"
             )
 
-        # 입력 토큰 카운팅
-        input_tokens = await count_tokens(request, file_data_list, file_types)
+        # DeepSeek Chat 모델 처리
+        if request.model == "deepseek-chat":
+            
+            # 시스템 프롬프트를 메시지 리스트의 첫 번째로 추가
+            messages = [
+                {"role": "system", "content": DEEPSEEK_CHAT_SYSTEM_PROMPT}
+            ] + [{"role": msg.role, "content": msg.content} for msg in request.messages]
+            
+            client = get_deepseek_client()
+            if not client:
+                raise HTTPException(
+                    status_code=500,
+                    detail="DeepSeek API key is not configured"
+                )
 
-        accumulated_content = ""
-        citations = []
-        output_tokens = 0
-
-        # 모델별 처리
-        if request.model in SONAR_MODELS:
-            async for chunk in generate_sonar_stream_response(
-                messages=messages,
+            messageId = generateUniqueId()
+            accumulated_content = ""
+            stream = await client.chat.completions.create(
                 model=request.model,
-                room_id=room_id,
-                db=db,
-                user_id=user_id
-            ):
-                yield chunk
+                messages=messages,
+                **DEEPSEEK_DEFAULT_CONFIG[request.model]
+            )
+
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'content') and delta.content:
+                        accumulated_content += delta.content
+                        response_data = {
+                            "id": messageId,
+                            "role": "assistant",
+                            "content": accumulated_content,
+                            "created_at": datetime.now().isoformat(),
+                            "updated_at": datetime.now().isoformat(),
+                            "room_id": room_id,
+                            "isStreaming": True
+                        }
+                        yield f"data: {json.dumps(response_data)}\n\n"
+
+            # 스트리밍 완료 후 최종 메시지 전송
+            final_response = {
+                "id": messageId,
+                "role": "assistant",
+                "content": accumulated_content,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "room_id": room_id,
+                "isStreaming": False
+            }
+            yield f"data: {json.dumps(final_response)}\n\n"
+
+            # 토큰 사용량 저장
+            if accumulated_content:
+                output_tokens = count_tokens_cached(accumulated_content, request.model)
+                input_tokens = count_messages_tokens(messages, request.model)
+                
+                crud_stats.create_token_usage(
+                    db=db,
+                    user_id=user_id,
+                    room_id=room_id,
+                    model=request.model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    timestamp=datetime.now(),
+                    cache_write_tokens=0,
+                    cache_hit_tokens=0
+                )
+
+                # 메시지 저장 (한 번만)
+                message_create = ChatMessageCreate(
+                    content=accumulated_content,
+                    role="assistant",
+                    room_id=room_id
+                )
+                crud_chat.create_message(db, room_id, message_create)
+
             return
-        elif request.model in DEEPSEEK_MODELS:
+
+        # DeepSeek 모델 처리
+        if request.model in DEEPSEEK_MODELS:
+            if file_data_list:  # DeepSeek는 파일 처리 지원하지 않음
+                raise HTTPException(
+                    status_code=400,
+                    detail="File upload is not supported for DeepSeek models"
+                )
+            
+            messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.messages
+                if msg.content and msg.content.strip()
+            ]
+            
             async for chunk in generate_deepseek_stream_response(
                 messages=messages,
                 model=request.model,
@@ -643,7 +659,45 @@ async def generate_stream_response(
             ):
                 yield chunk
             return
-        elif request.model in GEMINI_MODELS:
+
+        # Sonar 모델 처리
+        if request.model in SONAR_MODELS:
+            if file_data_list:  # Sonar는 파일 처리 지원하지 않음
+                raise HTTPException(
+                    status_code=400,
+                    detail="File upload is not supported for Sonar models"
+                )
+            
+            messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.messages
+                if msg.content and msg.content.strip()
+            ]
+            
+            async for chunk in generate_sonar_stream_response(
+                messages=messages,
+                model=request.model,
+                room_id=room_id,
+                db=db,
+                user_id=user_id
+            ):
+                yield chunk
+            return
+
+        # Gemini 모델 처리
+        if request.model in GEMINI_MODELS:
+            if file_data_list:  # Gemini는 현재 파일 처리를 지원하지 않음
+                raise HTTPException(
+                    status_code=400,
+                    detail="File upload is not supported for Gemini models"
+                )
+            
+            messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.messages
+                if msg.content and msg.content.strip()
+            ]
+            
             async for chunk in generate_gemini_stream_response(
                 messages=messages,
                 model=request.model,
@@ -653,42 +707,39 @@ async def generate_stream_response(
             ):
                 yield chunk
             return
-        else:
-            # Claude 모델 처리
-            # 파일이 있는 경우 멀티모달 메시지 구성
-            if file_data_list and file_types and request.model in MULTIMODAL_MODELS:
-                content = []
-                
-                # 각 파일에 대한 처리
-                for file_data, file_type in zip(file_data_list, file_types):
-                    content_type = "image" if file_type.startswith("image/") else "document"
-                    content.append({
-                        "type": content_type,
-                        "source": {
-                            "type": "base64",
-                            "media_type": file_type,
-                            "data": file_data
-                        }
-                    })
-                
-                # 텍스트 메시지가 있는 경우 추가
-                if request.messages and request.messages[-1].content:
-                    content.append({
-                        "type": "text",
-                        "text": request.messages[-1].content
-                    })
-                
-                # 멀티모달 메시지 구성
-                user_message = {
-                    "role": "user",
-                    "content": content
-                }
-                
-                # 이전 메시지들과 결합
-                messages = messages[:-1]  # 마지막 메시지 제외
-                messages.append(user_message)  # 새로운 멀티모달 메시지 추가
 
-            # 시스템 메시지 구성
+        # Claude 모델 처리
+        if file_data_list and request.model not in MULTIMODAL_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail="File upload is only supported for multimodal models"
+            )
+
+        # 대화방의 첫 메시지인지 확인
+        is_first_message = False
+        if db and room_id:
+            message_count = crud_chat.get_message_count(db, room_id)
+            is_first_message = message_count == 0
+
+        # 시스템 메시지 구성
+        system_blocks = []
+        
+        # 첫 메시지일 때만 상세 프롬프트 포함
+        if is_first_message:
+            system_blocks = [
+                {
+                    "type": "text",
+                    "text": BRIEF_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"}
+                },
+                {
+                    "type": "text",
+                    "text": DETAILED_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"}
+                }
+            ]
+        else:
+            # 후속 메시지에는 간단한 프롬프트만 포함
             system_blocks = [
                 {
                     "type": "text",
@@ -697,48 +748,101 @@ async def generate_stream_response(
                 }
             ]
 
-            # Claude API 호출
-            async with model_client.messages.stream(
-                model=request.model,
-                max_tokens=2048,
-                temperature=0.7,
-                system=system_blocks,
-                messages=messages
-            ) as stream:
-                async for text in stream.text_stream:
-                    accumulated_content += text
-                    yield f"data: {json.dumps({'content': text})}\n\n"
-                
-                output_tokens = stream.usage.output_tokens if hasattr(stream, 'usage') else int(len(accumulated_content.split()) * 4.5)
+        # 이전 메시지들 처리 (5개 초과분에 대해서만)
+        if len(request.messages) > MAX_MESSAGES:
+            older_messages = request.messages[:-MAX_MESSAGES]
+            # 가장 최근의 중요한 컨텍스트만 요약
+            recent_context = older_messages[-3:] if len(older_messages) > 3 else older_messages
+            context_summary = " ".join([msg.content for msg in recent_context if msg.content])
+            if context_summary:
+                system_blocks.append({
+                    "type": "text",
+                    "text": f"직전 대화 컨텍스트: {context_summary}",
+                    "cache_control": {"type": "ephemeral"}
+                })
 
-        # 토큰 사용량 저장
-        if db and user_id and room_id:
-            crud_stats.create_token_usage(
-                db=db,
-                user_id=user_id,
-                room_id=room_id,
-                model=request.model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                timestamp=datetime.now()
-            )
-        
-        # AI 응답 메시지 저장 및 상태 업데이트
-        if accumulated_content:
-            message_data = {
-                "content": accumulated_content,
-                "role": "assistant",
-                "room_id": room_id,
-                "citations": citations,
-                "files": None
+        request.messages = valid_messages[-MAX_MESSAGES:]  # 최근 5개 메시지만 유지
+
+        # 입력 토큰 카운팅
+        input_tokens = await count_tokens(request, file_data_list, file_types)
+
+        # 기본 설정
+        max_tokens = 2048
+        temperature = 0.7
+
+        messages = []
+        if file_data_list and file_types and request.model in MULTIMODAL_MODELS:
+            user_message = {
+                "role": "user",
+                "content": []
             }
             
-            message_create = ChatMessageCreate(**message_data)
-            crud_chat.create_message(db, room_id, message_create)
+            # 각 파일에 대한 처리
+            for i, (file_data, file_type) in enumerate(zip(file_data_list, file_types)):
+                content_type = "image" if file_type.startswith("image/") else "document"
+                user_message["content"].append({
+                    "type": content_type,
+                    "source": {
+                        "type": "base64",
+                        "media_type": file_type,
+                        "data": file_data,
+                    }
+                })
             
-            # 응답을 상태에 추가
-            if chat_memory:
-                chat_memory.add_message("assistant", accumulated_content)
+            if request.messages and request.messages[-1].content:
+                user_message["content"].append({
+                    "type": "text",
+                    "text": request.messages[-1].content
+                })
+            
+            messages = request.messages[:-1] if request.messages else []
+            messages.append(user_message)
+        else:
+            messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+
+        accumulated_content = ""
+        citations = []
+        output_tokens = 0
+        
+        async with model_client.messages.stream(
+            model=request.model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_blocks,
+            messages=messages
+        ) as stream:
+            async for text in stream.text_stream:
+                accumulated_content += text
+                yield f"data: {json.dumps({'content': text})}\n\n"
+            
+            # 스트림이 완료된 후 토큰 사용량 저장
+            output_tokens = stream.usage.output_tokens if hasattr(stream, 'usage') else int(len(accumulated_content.split()) * 4.5)
+            
+            # 토큰 사용량 저장
+            if db and user_id and room_id:
+                crud_stats.create_token_usage(
+                    db=db,
+                    user_id=user_id,
+                    room_id=room_id,
+                    model=request.model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    timestamp=datetime.now()
+                )
+            
+            # AI 응답 메시지 저장
+            if accumulated_content:
+                message_data = {
+                    "content": accumulated_content,
+                    "role": "assistant",
+                    "room_id": room_id,
+                    "citations": citations,
+                    "files": None
+                }
+                
+                message_create = ChatMessageCreate(**message_data)
+                
+                crud_chat.create_message(db, room_id, message_create)
 
     except Exception as e:
         error_message = f"Error: {str(e)}"
@@ -803,12 +907,6 @@ async def delete_chat_room(
     success = crud_chat.delete_chat_room(db=db, room_id=room_id, user_id=current_user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Chat room not found")
-    
-    # 채팅방의 메모리 인스턴스 제거
-    if room_id in SharedChatMemory._instances:
-        SharedChatMemory._instances[room_id].clear()
-        del SharedChatMemory._instances[room_id]
-    
     return {"status": "success"}
 
 @router.post("/rooms/{room_id}/messages")
@@ -1166,6 +1264,9 @@ async def generate_project_sonar_stream_response(
         project = crud_project.get(db=db, id=project_id)
         chat_type = f"project_{project.type}" if project and project.type else None
         
+        for msg in messages:
+            print(f"Role: {msg['role']}")
+            print(f"Content: {msg['content']}\n")
 
         headers = {
             "Authorization": f"Bearer {settings.SONAR_API_KEY}",
@@ -1183,6 +1284,9 @@ async def generate_project_sonar_stream_response(
                 "content": msg["content"]
             })
         
+        for msg in formatted_messages:
+            print(f"Role: {msg['role']}")
+            print(f"Content: {msg['content']}\n")
 
         payload = {
             "model": model,
@@ -1393,22 +1497,19 @@ async def generate_gemini_stream_response(
                 detail="Gemini API key is not configured"
             )
 
-        # 최근 3개의 메시지만 선택
-        recent_messages = messages[-3:] if len(messages) > 3 else messages
-
-        # 시스템 프롬프트와 대화 내용 구성
-        conversation = f"{GEMINI_SYSTEM_PROMPT}\n\n"
-        for msg in recent_messages:
-            role = "사용자" if msg["role"] == "user" else "어시스턴트"
-            conversation += f"{role}: {msg['content']}\n"
+        # 마지막 메시지 내용 가져오기
+        last_message = messages[-1]["content"] if messages else ""
+        
+        # 시스템 프롬프트와 사용자 메시지 결합
+        prompt = f"{GEMINI_SYSTEM_PROMPT}\n\n사용자: {last_message}"
         
         # 입력 토큰 계산
-        token_count = await count_gemini_tokens(conversation, model, gemini_model)
+        token_count = await count_gemini_tokens(prompt, model, gemini_model)
         input_tokens = token_count["input_tokens"]
 
         # 스트리밍 응답 생성
         response = gemini_model.generate_content(
-            conversation,
+            prompt,
             generation_config=GEMINI_DEFAULT_CONFIG[model],
             stream=True
         )
@@ -1421,17 +1522,27 @@ async def generate_gemini_stream_response(
                 content_chunk = chunk.text
                 accumulated_content += content_chunk
                 yield f"data: {json.dumps({'content': content_chunk})}\n\n"
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0)  # 비동기 컨텍스트 유지
+
+        # 토큰 사용량 계산 및 저장
+        output_tokens = 0
+        if hasattr(response, 'candidates') and response.candidates:
+            for candidate in response.candidates:
+                if hasattr(candidate, 'token_count'):
+                    output_tokens = candidate.token_count
+                    break
+
+        if not output_tokens:
+            output_tokens = len(accumulated_content.split())
 
         # 토큰 사용량 저장
-        output_tokens = len(accumulated_content.split()) * 1.3
         crud_stats.create_token_usage(
             db=db,
             user_id=user_id,
             room_id=room_id,
             model=model,
             input_tokens=input_tokens,
-            output_tokens=int(output_tokens),
+            output_tokens=output_tokens,
             timestamp=datetime.now()
         )
 
