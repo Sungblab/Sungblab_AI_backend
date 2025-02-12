@@ -8,4 +8,10 @@ venv
 .idea
 .vscode
 *.log
-*.sqlite3 
+*.sqlite3
+.cursor
+alembic/versions/__pycache__
+tests/
+docs/
+.coverage
+htmlcov/ 

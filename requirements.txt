@@ -25,3 +25,8 @@ pytz
 openai
 tiktoken
 google-generativeai
+langchain
+langchain-community
+langchain-openai
+langchain-anthropic
+langgraph
