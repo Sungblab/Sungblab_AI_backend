@@ -938,32 +938,28 @@ async def generate_gemini_stream_response(
         project_id = project.id
         chat_id = room_id
 
-        # 대화 기록을 포함한 프롬프트 구성
+        # 전체 대화 컨텍스트 구성
         conversation_history = []
-        for msg in messages[-5:]:  # 최근 5개 메시지만 사용
+        for msg in messages:
             role = "시스템" if msg["role"] == "system" else "사용자" if msg["role"] == "user" else "어시스턴트"
-            conversation_history.append({
-                "role": role,
-                "parts": [msg["content"]]
-            })
-
-        # 시스템 프롬프트 구성
+            conversation_history.append(f"{role}: {msg['content']}")
+        
+        # 시스템 프롬프트와 대화 내용 결합
         system_prompt = BRIEF_SYSTEM_PROMPT["text"]
         if project.type == "assignment":
             system_prompt += "\n\n" + ASSIGNMENT_PROMPT["text"]
         elif project.type == "record":
             system_prompt += "\n\n" + RECORD_PROMPT["text"]
 
-        # Gemini 채팅 세션 생성
-        chat = gemini_model.start_chat(history=conversation_history)
+        prompt = f"{system_prompt}\n\n"
+        prompt += "\n".join(conversation_history)
         
         # 입력 토큰 계산
-        prompt = f"{system_prompt}\n\n{messages[-1]['content']}"
         token_count = await count_gemini_tokens(prompt, model, gemini_model)
         input_tokens = token_count["input_tokens"]
 
         # 스트리밍 응답 생성
-        response = chat.send_message(
+        response = gemini_model.generate_content(
             prompt,
             generation_config=GEMINI_DEFAULT_CONFIG[model],
             stream=True
