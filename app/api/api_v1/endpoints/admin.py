@@ -4,8 +4,8 @@ from typing import List
 from app.api import deps
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.admin import UserResponse, UserUpdate
-from app.crud import crud_user
+from app.schemas.admin import UserResponse, UserUpdate, AdminOverviewResponse
+from app.crud import crud_user, crud_admin
 from app.crud import crud_project
 from app.crud import crud_subscription
 from app.models.subscription import Subscription, SubscriptionPlan, KST
@@ -87,7 +87,7 @@ def delete_user(
     _: User = Depends(get_current_admin)
 ):
     """
-    사용자를 삭제합니다.
+    사용자를 삭제합니다. 토큰 사용량 데이터는 보존됩니다.
     """
     try:
         user = crud_user.get_user(db, id=user_id)
@@ -98,12 +98,12 @@ def delete_user(
         if user.id == _.id:
             raise HTTPException(status_code=400, detail="자신의 계정은 삭제할 수 없습니다.")
         
-        # 구독 정보 삭제
+        # 구독 정보에서 user_id만 None으로 설정하고 토큰 사용량은 보존
         subscription = db.query(Subscription).filter(
             Subscription.user_id == str(user.id)
         ).first()
         if subscription:
-            db.delete(subscription)
+            subscription.user_id = None
             db.flush()
         
         # 사용자 삭제
@@ -165,4 +165,41 @@ def reset_usage(
     if not updated_subscription:
         raise HTTPException(status_code=404, detail="구독 정보를 찾을 수 없습니다.")
     
-    return updated_subscription.to_dict() 
+    return updated_subscription.to_dict()
+
+@router.get("/overview", response_model=AdminOverviewResponse)
+def get_admin_overview(
+    db: Session = Depends(deps.get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    관리자 대시보드의 Overview 데이터를 반환합니다.
+    """
+    try:
+        # 사용자 통계
+        user_stats = crud_admin.get_user_stats(db)
+        
+        # 구독 통계
+        subscription_stats = crud_admin.get_subscription_stats(db)
+        
+        # 최근 가입자
+        recent_users = crud_admin.get_recent_users(db)
+        
+        # AI 모델 사용량
+        model_usage_stats = crud_admin.get_model_usage_stats(db)
+        
+        return {
+            "user_stats": user_stats,
+            "subscription_stats": subscription_stats,
+            "recent_users": recent_users,
+            "model_usage_stats": model_usage_stats
+        }
+        
+    except Exception as e:
+        print(f"Overview 데이터 조회 중 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Overview 데이터를 불러오는데 실패했습니다: {str(e)}"
+        ) 

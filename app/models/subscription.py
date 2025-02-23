@@ -187,8 +187,8 @@ class Subscription(Base):
             "end_date": self.end_date.isoformat() if self.end_date else None,
             "auto_renew": self.auto_renew,
             "renewal_date": self.renewal_date.isoformat() if self.renewal_date else None,
-            "user_email": self.user.email,
-            "user_name": self.user.full_name,
+            "user_email": self.user.email if self.user else "[삭제된 사용자]",
+            "user_name": self.user.full_name if self.user else "[삭제된 사용자]",
             "group_usage": self.group_usage,
             "group_limits": self.group_limits,
             "days_remaining": (self.end_date - get_kr_time()).days if self.end_date else 0

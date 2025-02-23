@@ -46,7 +46,7 @@ def delete_current_user(
     db: Session = Depends(deps.get_db)
 ):
     """
-    현재 로그인한 사용자의 계정을 삭제합니다.
+    현재 로그인한 사용자의 계정을 삭제합니다. 토큰 사용량 데이터는 보존됩니다.
     """
     try:
         # crud_user를 통해 사용자 조회
@@ -54,12 +54,12 @@ def delete_current_user(
         if not user:
             raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
-        # 구독 정보 삭제
+        # 구독 정보에서 user_id만 None으로 설정하고 토큰 사용량은 보존
         subscription = db.query(Subscription).filter(
             Subscription.user_id == str(user.id)
         ).first()
         if subscription:
-            db.delete(subscription)
+            subscription.user_id = None
             db.flush()
 
         # 사용자 삭제
