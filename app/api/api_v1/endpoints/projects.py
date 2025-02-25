@@ -104,7 +104,7 @@ PROJECT_DEFAULT_SETTINGS = {
 
 # 파일 업로드 관련 상수
 ALLOWED_MODELS = [
-    "claude-3-5-sonnet-20241022", 
+    "claude-3-7-sonnet-20250219", 
     "claude-3-5-haiku-20241022",
     "sonar-pro",
     "sonar",
@@ -112,7 +112,7 @@ ALLOWED_MODELS = [
     "deepseek-reasoner",
     "gemini-2.0-flash",
 ]
-MULTIMODAL_MODELS = ["claude-3-5-sonnet-20241022"]  # 멀티모달을 지원하는 모델 리스트
+MULTIMODAL_MODELS = ["claude-3-7-sonnet-20250219"]  # 멀티모달을 지원하는 모델 리스트
 MAX_FILE_SIZE = 32 * 1024 * 1024  # 32MB
 MAX_PDF_PAGES = 100
 MAX_IMAGE_DIMENSION = 8000
@@ -513,10 +513,6 @@ async def stream_project_chat(
             # 첫 메시지 여부 확인
             is_first_message = len(request_data["messages"]) <= 1
             
-            # 시스템 프롬프트 생성
-            system_prompt = BRIEF_SYSTEM_PROMPT["text"]
-            prompt = f"{system_prompt}\n\n사용자: {request_data['messages'][-1]['content'] if request_data['messages'] else ''}"
-            
             # 사용자 메시지 저장
             user_message = {
                 "content": request_data["messages"][-1]["content"] if request_data["messages"] else "",
@@ -534,9 +530,16 @@ async def stream_project_chat(
                 obj_in=ChatMessageCreate(**user_message)
             )
             
+            # 전체 메시지 이력 전달
+            messages = [
+                {"role": msg["role"], "content": msg["content"]}
+                for msg in request_data["messages"]
+                if msg["content"] and msg["content"].strip()
+            ]
+            
             return StreamingResponse(
                 generate_gemini_stream_response(
-                    messages=[{"role": "user", "content": prompt}],  # 결합된 프롬프트 전달
+                    messages=messages,  # 전체 메시지 이력 전달
                     model=request_data["model"],
                     room_id=chat_id,
                     db=db,
@@ -951,6 +954,11 @@ async def generate_gemini_stream_response(
         elif project.type == "record":
             system_prompt += "\n\n" + RECORD_PROMPT["text"]
 
+        # 프로젝트의 추가 시스템 프롬프트가 있다면 추가
+        if project.system_instruction:
+            system_prompt += "\n\n" + project.system_instruction
+
+        # 최종 프롬프트 구성
         prompt = f"{system_prompt}\n\n"
         prompt += "\n".join(conversation_history)
         
@@ -974,7 +982,7 @@ async def generate_gemini_stream_response(
                 content_chunk = chunk.text
                 accumulated_content += content_chunk
                 yield f"data: {json.dumps({'content': content_chunk})}\n\n"
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.01)  # 비동기 컨텍스트 유지
 
         # 응답 완료 후 메시지 저장
         if accumulated_content:

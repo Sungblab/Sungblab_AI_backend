@@ -41,7 +41,7 @@ class ModelGroup(str, enum.Enum):
     NORMAL_ANALYSIS = "normal_analysis" 
     ADVANCED_ANALYSIS = "advanced_analysis"  
 class AIModel(str, enum.Enum):
-    CLAUDE_SONNET = "claude-3-5-sonnet-20241022"
+    CLAUDE_SONNET = "claude-3-7-sonnet-20250219"
     CLAUDE_HAIKU = "claude-3-5-haiku-20241022"
     SONAR_PRO = "sonar-pro"
     SONAR = "sonar"
@@ -54,7 +54,7 @@ MODEL_GROUP_MAPPING = {
     "sonar": ModelGroup.NORMAL_ANALYSIS,
     "sonar-reasoning": ModelGroup.NORMAL_ANALYSIS,  
     "deepseek-reasoner": ModelGroup.NORMAL_ANALYSIS,
-    "claude-3-5-sonnet-20241022": ModelGroup.ADVANCED_ANALYSIS,
+    "claude-3-7-sonnet-20250219": ModelGroup.ADVANCED_ANALYSIS,
     "sonar-pro": ModelGroup.ADVANCED_ANALYSIS,
     "gemini-2.0-flash": ModelGroup.BASIC_CHAT,  
 }

@@ -10,7 +10,7 @@ from datetime import datetime
 
 # 파일 상단에 MODEL_GROUP_MAPPING 추가
 MODEL_GROUP_MAPPING = {
-    "claude-3-5-sonnet-20241022": "claude",
+    "claude-3-7-sonnet-20250219": "claude",
     "claude-3-5-haiku-20241022": "claude",
     "sonar-pro": "sonar",
     "sonar": "sonar",

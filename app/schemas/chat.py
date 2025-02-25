@@ -82,7 +82,7 @@ class ChatMessageRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessageRequest]
     model: Literal[
-        "claude-3-5-sonnet-20241022",
+        "claude-3-7-sonnet-20250219",
         "claude-3-5-haiku-20241022",
         "sonar-pro",
         "sonar",
@@ -99,6 +99,9 @@ class TokenUsage(BaseModel):
     input_tokens: int
     output_tokens: int
     timestamp: datetime
+    chat_type: Optional[str] = None
+    cache_write_tokens: Optional[int] = 0
+    cache_hit_tokens: Optional[int] = 0
 
     class Config:
         from_attributes = True
