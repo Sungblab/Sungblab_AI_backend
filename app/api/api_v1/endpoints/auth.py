@@ -1,5 +1,5 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
@@ -22,6 +22,7 @@ router = APIRouter()
 class LoginRequest(BaseModel):
     email: str
     password: str
+    remember_me: bool = False
 
 class EmailVerificationRequest(BaseModel):
     email: EmailStr
@@ -62,7 +63,8 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 def login(
     db: Session = Depends(get_db),
-    form_data: OAuth2PasswordRequestForm = Depends()
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    remember_me: bool = Form(False)
 ):
     user = crud_user.authenticate(
         db, email=form_data.username, password=form_data.password
@@ -73,7 +75,15 @@ def login(
             detail="이메일 또는 비밀번호가 올바르지 않습니다.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    # remember_me 값에 따라 토큰 만료 시간 설정
+    if remember_me:
+        # 장기 토큰 (30일)
+        access_token_expires = timedelta(days=30)
+    else:
+        # 기본 토큰 (1일)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
     access_token = security.create_access_token(
         user.id, expires_delta=access_token_expires
     )
@@ -96,7 +106,15 @@ def login_json(
             detail="이메일 또는 비밀번호가 올바르지 않습니다.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    # remember_me 값에 따라 토큰 만료 시간 설정
+    if login_data.remember_me:
+        # 장기 토큰 (30일)
+        access_token_expires = timedelta(days=30)
+    else:
+        # 기본 토큰 (1일)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
     access_token = security.create_access_token(
         user.id, expires_delta=access_token_expires
     )
@@ -220,8 +238,15 @@ async def google_auth(
                 detail=f"이미 {user.auth_provider.value} 계정으로 가입된 이메일입니다."
             )
 
+        # remember_me 값에 따라 토큰 만료 시간 설정
+        if social_login.remember_me:
+            # 장기 토큰 (30일)
+            access_token_expires = timedelta(days=30)
+        else:
+            # 기본 토큰 (1일)
+            access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
         # 액세스 토큰 생성
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = security.create_access_token(
             user.id, expires_delta=access_token_expires
         )

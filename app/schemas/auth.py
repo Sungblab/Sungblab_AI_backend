@@ -26,6 +26,7 @@ class Token(BaseModel):
 class SocialLogin(BaseModel):
     provider: AuthProvider
     access_token: str
+    remember_me: bool = False
 
 class GoogleUser(BaseModel):
     email: str
