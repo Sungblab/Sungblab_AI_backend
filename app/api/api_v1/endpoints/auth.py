@@ -89,7 +89,8 @@ def login(
     )
     return {
         "access_token": access_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
     }
 
 @router.post("/login-json", response_model=Token)
@@ -120,7 +121,8 @@ def login_json(
     )
     return {
         "access_token": access_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
     }
 
 @router.get("/me", response_model=User)
@@ -238,13 +240,8 @@ async def google_auth(
                 detail=f"이미 {user.auth_provider.value} 계정으로 가입된 이메일입니다."
             )
 
-        # remember_me 값에 따라 토큰 만료 시간 설정
-        if social_login.remember_me:
-            # 장기 토큰 (30일)
-            access_token_expires = timedelta(days=30)
-        else:
-            # 기본 토큰 (1일)
-            access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        # 소셜 로그인은 항상 30일 토큰 발급
+        access_token_expires = timedelta(days=30)
 
         # 액세스 토큰 생성
         access_token = security.create_access_token(
@@ -253,7 +250,8 @@ async def google_auth(
 
         return {
             "access_token": access_token,
-            "token_type": "bearer"
+            "token_type": "bearer",
+            "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
         }
     except Exception as e:
         raise HTTPException(

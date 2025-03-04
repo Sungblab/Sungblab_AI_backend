@@ -22,11 +22,11 @@ class User(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    expires_in: int  # 토큰 만료 시간 (초 단위)
 
 class SocialLogin(BaseModel):
     provider: AuthProvider
     access_token: str
-    remember_me: bool = False
 
 class GoogleUser(BaseModel):
     email: str
