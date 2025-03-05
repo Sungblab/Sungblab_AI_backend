@@ -1,6 +1,7 @@
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
+from app.models.subscription import SubscriptionPlan
 
 class UserResponse(BaseModel):
     id: str
