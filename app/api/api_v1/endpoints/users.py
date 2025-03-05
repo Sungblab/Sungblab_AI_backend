@@ -9,66 +9,36 @@ from app.models.subscription import Subscription
 from app.models.user import User as UserModel
 from app.crud import crud_user
 from pydantic import BaseModel
-from app.schemas.user import UserProfile, UserProfileUpdate
-from app.schemas.subscription import SubscriptionInfo
-from app.crud import crud_subscription
-from app.core.utils import get_kr_time
 
 router = APIRouter()
 
-@router.get("/me", response_model=UserProfile)
-def get_user_profile(
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_user)
+@router.get("/me", response_model=User)
+def read_current_user(
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """
-    현재 로그인한 사용자의 프로필 정보를 조회합니다.
+    현재 로그인한 사용자의 정보를 반환합니다.
     """
-    return current_user
+    return current_user 
 
-@router.put("/me", response_model=UserProfile)
-def update_user_profile(
-    profile_update: UserProfileUpdate,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_user)
+@router.get("/me/subscription", response_model=dict)
+def get_my_subscription(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(deps.get_db)
 ):
-    """
-    현재 로그인한 사용자의 프로필 정보를 업데이트합니다.
-    """
-    updated_user = crud_user.update_user(
-        db, 
-        user_id=str(current_user.id), 
-        user_in=profile_update
-    )
-    return updated_user
-
-@router.get("/me/subscription", response_model=SubscriptionInfo)
-def get_user_subscription(
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    현재 로그인한 사용자의 구독 정보를 조회합니다.
-    만료된 구독은 자동으로 갱신됩니다.
-    """
-    # 구독 정보 조회 (이 함수 내에서 만료된 구독은 자동 갱신됨)
-    subscription = crud_subscription.get_subscription(db, str(current_user.id))
+    """현재 사용자의 구독 정보를 조회합니다."""
+    subscription = db.query(Subscription).filter(
+        Subscription.user_id == str(current_user.id)
+    ).first()
+    
     if not subscription:
-        raise HTTPException(status_code=404, detail="구독 정보를 찾을 수 없습니다.")
+        raise HTTPException(
+            status_code=404,
+            detail="구독 정보를 찾을 수 없습니다."
+        )
     
-    # 현재 시간 기준으로 남은 일수 계산
-    current_time = get_kr_time()
-    remaining_days = (subscription.end_date - current_time).days
-    
-    return {
-        "plan": subscription.plan,
-        "start_date": subscription.start_date,
-        "end_date": subscription.end_date,
-        "remaining_days": max(0, remaining_days),  # 음수 방지
-        "monthly_token_limit": subscription.monthly_token_limit,
-        "remaining_tokens": subscription.remaining_tokens,
-        "token_usage_percent": round((1 - subscription.remaining_tokens / subscription.monthly_token_limit) * 100, 1) if subscription.monthly_token_limit > 0 else 0
-    }
+    return subscription.to_dict() 
 
 @router.delete("/me", response_model=dict)
 def delete_current_user(

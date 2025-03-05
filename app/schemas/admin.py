@@ -1,7 +1,6 @@
 from typing import Optional, List
 from pydantic import BaseModel
 from datetime import datetime
-from app.models.subscription import SubscriptionPlan
 
 class UserResponse(BaseModel):
     id: str
@@ -52,12 +51,4 @@ class AdminOverviewResponse(BaseModel):
     user_stats: UserStats
     subscription_stats: SubscriptionStats
     recent_users: List[RecentUserResponse]
-    model_usage_stats: List[ModelUsageStats]
-
-class SubscriptionUpdate(BaseModel):
-    plan: SubscriptionPlan
-    update_limits: bool = True
-    
-class ExpiredSubscriptionResponse(BaseModel):
-    total_updated: int
-    updated_users: List[str] 
+    model_usage_stats: List[ModelUsageStats] 
