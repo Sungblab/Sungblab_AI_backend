@@ -8,7 +8,7 @@ from app.schemas.admin import UserResponse, UserUpdate, AdminOverviewResponse
 from app.crud import crud_user, crud_admin
 from app.crud import crud_project
 from app.crud import crud_subscription
-from app.models.subscription import Subscription, SubscriptionPlan, KST
+from app.models.subscription import Subscription, SubscriptionPlan, KST, PLAN_LIMITS
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.core.utils import get_kr_time
