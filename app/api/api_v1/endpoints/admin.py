@@ -297,4 +297,104 @@ def _reset_expired_subscriptions(db: Session):
         db.rollback()
         print(f"자동 구독 초기화 중 오류 발생: {str(e)}")
         import traceback
+        traceback.print_exc()
+
+@router.post("/subscriptions/auto-renew", response_model=ExpiredSubscriptionResponse)
+def auto_renew_subscriptions(
+    db: Session = Depends(deps.get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    만료된 모든 구독을 30일 자동 갱신합니다.
+    남은 기간이 0일 이하인 구독을 찾아 30일 연장하고 사용량을 초기화합니다.
+    """
+    try:
+        current_time = get_kr_time()
+        
+        # 만료된 구독 찾기 (end_date가 현재 시간보다 이전인 경우)
+        expired_subscriptions = db.query(Subscription).filter(
+            Subscription.end_date < current_time,
+            Subscription.user_id.isnot(None)  # 사용자가 있는 구독만
+        ).all()
+        
+        updated_users = []
+        
+        # 각 만료된 구독을 30일 갱신
+        for subscription in expired_subscriptions:
+            # 현재 시간부터 30일 추가
+            new_end_date = current_time + timedelta(days=30)
+            subscription.end_date = new_end_date
+            
+            # 사용량 초기화
+            subscription.monthly_token_limit = crud_subscription.get_plan_token_limit(subscription.plan)
+            subscription.remaining_tokens = subscription.monthly_token_limit
+            
+            # 사용자 ID 저장 (응답용)
+            if subscription.user_id:
+                updated_users.append(subscription.user_id)
+        
+        db.commit()
+        
+        return {
+            "total_updated": len(expired_subscriptions),
+            "updated_users": updated_users
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"구독 자동 갱신 중 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"구독을 자동 갱신하는 중 오류가 발생했습니다: {str(e)}"
+        )
+
+@router.post("/subscriptions/schedule-auto-renew")
+def schedule_auto_renew_subscriptions(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    백그라운드 작업으로 만료된 구독을 자동으로 30일 갱신합니다.
+    이 엔드포인트는 스케줄러에 의해 정기적으로 호출될 수 있습니다.
+    """
+    background_tasks.add_task(_auto_renew_subscriptions, db)
+    return {"message": "구독 자동 갱신 작업이 시작되었습니다."}
+
+def _auto_renew_subscriptions(db: Session):
+    """
+    만료된 구독을 30일 자동 갱신하는 백그라운드 작업
+    """
+    try:
+        current_time = get_kr_time()
+        
+        # 만료된 구독 찾기 (end_date가 현재 시간보다 이전인 경우)
+        expired_subscriptions = db.query(Subscription).filter(
+            Subscription.end_date < current_time,
+            Subscription.user_id.isnot(None)  # 사용자가 있는 구독만
+        ).all()
+        
+        renewed_count = 0
+        
+        # 각 만료된 구독을 30일 갱신
+        for subscription in expired_subscriptions:
+            # 현재 시간부터 30일 추가
+            new_end_date = current_time + timedelta(days=30)
+            subscription.end_date = new_end_date
+            
+            # 사용량 초기화
+            subscription.monthly_token_limit = crud_subscription.get_plan_token_limit(subscription.plan)
+            subscription.remaining_tokens = subscription.monthly_token_limit
+            
+            renewed_count += 1
+        
+        db.commit()
+        print(f"자동 갱신 완료: {renewed_count}개의 구독이 30일 갱신되었습니다.")
+        
+    except Exception as e:
+        db.rollback()
+        print(f"구독 자동 갱신 중 오류 발생: {str(e)}")
+        import traceback
         traceback.print_exc() 
