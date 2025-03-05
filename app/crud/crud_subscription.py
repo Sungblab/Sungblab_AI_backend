@@ -38,6 +38,7 @@ def update_subscription_plan(db: Session, user_id: str, plan: SubscriptionPlan, 
             subscription.end_date = current_time + timedelta(days=30)
             subscription.renewal_date = subscription.end_date
             subscription.status = "active"
+            from app.models.subscription import PLAN_LIMITS
             subscription.group_limits = PLAN_LIMITS[plan]
             subscription.reset_usage()
         else:
@@ -76,8 +77,29 @@ def check_and_update_expiration(db: Session, user_id: str) -> Optional[Subscript
         
         if not subscription:
             return None
+        
+        current_time = get_kr_time()
+        
+        # 구독이 만료되었는지 확인
+        if subscription.end_date and current_time >= subscription.end_date:
+            # 만료된 경우 무조건 갱신
+            subscription.start_date = current_time
+            subscription.end_date = current_time + timedelta(days=30)
+            subscription.renewal_date = subscription.end_date
+            subscription.status = "active"
             
-        subscription.check_expiration()
+            # 무료 플랜으로 설정 (유료 플랜이었다면)
+            if subscription.plan != SubscriptionPlan.FREE:
+                subscription.plan = SubscriptionPlan.FREE
+                from app.models.subscription import PLAN_LIMITS
+                subscription.group_limits = PLAN_LIMITS[SubscriptionPlan.FREE]
+            
+            # 사용량 초기화
+            subscription.reset_usage()
+        else:
+            # 기존 로직 유지
+            subscription.check_expiration()
+            
         db.commit()
         db.refresh(subscription)
         return subscription
