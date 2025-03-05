@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.core.utils import get_kr_time
 from sqlalchemy import update
+from datetime import datetime, timedelta
 
 def get_subscription(db: Session, user_id: str) -> Optional[Subscription]:
     """사용자의 구독 정보를 조회합니다."""
@@ -24,8 +25,24 @@ def update_subscription_plan(db: Session, user_id: str, plan: SubscriptionPlan, 
     subscription.plan = plan
     
     if update_limits:
+        # 현재 시간 가져오기
+        current_time = get_kr_time()
+        
+        # 구독이 만료되었는지 확인 (0일 이하로 남은 경우)
+        is_expired = subscription.end_date and current_time >= subscription.end_date
+        
         # 플랜에 맞는 제한량으로 업데이트하고 구독 기간 갱신
-        subscription.update_limits_for_plan()
+        if is_expired:
+            # 만료된 경우 무조건 갱신
+            subscription.start_date = current_time
+            subscription.end_date = current_time + timedelta(days=30)
+            subscription.renewal_date = subscription.end_date
+            subscription.status = "active"
+            subscription.group_limits = PLAN_LIMITS[plan]
+            subscription.reset_usage()
+        else:
+            # 만료되지 않은 경우 기존 로직 유지
+            subscription.update_limits_for_plan()
     
     db.add(subscription)
     db.commit()
