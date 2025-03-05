@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 from app.api import deps
@@ -251,4 +251,50 @@ def reset_expired_subscriptions(
         raise HTTPException(
             status_code=500,
             detail=f"만료된 구독을 초기화하는 중 오류가 발생했습니다: {str(e)}"
-        ) 
+        )
+
+@router.post("/subscriptions/auto-reset-expired")
+def auto_reset_expired_subscriptions(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    백그라운드 작업으로 만료된 구독을 자동으로 무료 플랜으로 초기화합니다.
+    이 엔드포인트는 스케줄러에 의해 정기적으로 호출될 수 있습니다.
+    """
+    background_tasks.add_task(_reset_expired_subscriptions, db)
+    return {"message": "만료된 구독 자동 초기화 작업이 시작되었습니다."}
+
+def _reset_expired_subscriptions(db: Session):
+    """
+    만료된 구독을 무료 플랜으로 초기화하는 백그라운드 작업
+    """
+    try:
+        current_time = get_kr_time()
+        
+        # 만료된 구독 찾기 (end_date가 현재 시간보다 이전인 경우)
+        expired_subscriptions = db.query(Subscription).filter(
+            Subscription.end_date < current_time,
+            Subscription.plan != SubscriptionPlan.FREE,
+            Subscription.user_id.isnot(None)  # 사용자가 있는 구독만
+        ).all()
+        
+        updated_count = 0
+        
+        # 각 만료된 구독을 무료 플랜으로 변경
+        for subscription in expired_subscriptions:
+            subscription.plan = SubscriptionPlan.FREE
+            # 무료 플랜의 기본 한도로 초기화
+            subscription.monthly_token_limit = crud_subscription.get_plan_token_limit(SubscriptionPlan.FREE)
+            subscription.remaining_tokens = subscription.monthly_token_limit
+            updated_count += 1
+        
+        db.commit()
+        print(f"자동 초기화 완료: {updated_count}개의 만료된 구독이 무료 플랜으로 변경되었습니다.")
+        
+    except Exception as e:
+        db.rollback()
+        print(f"자동 구독 초기화 중 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc() 

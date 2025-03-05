@@ -7,6 +7,8 @@ import logging
 import pytz
 from datetime import datetime
 import os
+from app.core.scheduler import init_scheduler
+import atexit
 
 # 한국 시간대 설정
 os.environ['TZ'] = 'Asia/Seoul'
@@ -50,6 +52,14 @@ async def startup_event():
     logger.info("Initializing database...")
     init_db()
     logger.info("Database initialization complete")
+
+    # 스케줄러 초기화 및 시작
+    scheduler = init_scheduler()
+    scheduler.start()
+    logger.info("스케줄러가 시작되었습니다.")
+
+    # 애플리케이션 종료 시 스케줄러 종료
+    atexit.register(lambda: scheduler.shutdown())
 
 app.include_router(api_router, prefix=settings.API_V1_STR.strip())
 
