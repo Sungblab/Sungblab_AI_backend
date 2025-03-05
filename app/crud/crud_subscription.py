@@ -3,10 +3,46 @@ from sqlalchemy.orm import Session
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.core.utils import get_kr_time
 from sqlalchemy import update
+from app.models.user import User
+from datetime import datetime, timedelta
+
+# 플랜별 기본 토큰 한도
+PLAN_TOKEN_LIMITS = {
+    SubscriptionPlan.FREE: 10000,
+    SubscriptionPlan.BASIC: 100000,
+    SubscriptionPlan.PREMIUM: 500000,
+    SubscriptionPlan.ENTERPRISE: 1000000
+}
+
+def get_plan_token_limit(plan: SubscriptionPlan) -> int:
+    """플랜에 따른 기본 토큰 한도를 반환합니다."""
+    return PLAN_TOKEN_LIMITS.get(plan, PLAN_TOKEN_LIMITS[SubscriptionPlan.FREE])
 
 def get_subscription(db: Session, user_id: str) -> Optional[Subscription]:
-    """사용자의 구독 정보를 조회합니다."""
-    return db.query(Subscription).filter(Subscription.user_id == user_id).first()
+    """
+    사용자의 구독 정보를 조회합니다.
+    남은 기간이 0일 이하인 경우 자동으로 30일 갱신합니다.
+    """
+    subscription = db.query(Subscription).filter(Subscription.user_id == user_id).first()
+    
+    if subscription:
+        # 현재 시간 기준으로 만료 여부 확인
+        current_time = get_kr_time()
+        
+        # 만료된 경우 자동 갱신
+        if subscription.end_date < current_time:
+            # 현재 시간부터 30일 추가
+            new_end_date = current_time + timedelta(days=30)
+            subscription.end_date = new_end_date
+            
+            # 사용량 초기화
+            subscription.monthly_token_limit = get_plan_token_limit(subscription.plan)
+            subscription.remaining_tokens = subscription.monthly_token_limit
+            
+            db.commit()
+            print(f"사용자 {user_id}의 구독이 자동 갱신되었습니다. 새 만료일: {new_end_date}")
+    
+    return subscription
 
 def get_all_subscriptions(db: Session, skip: int = 0, limit: int = 100):
     """모든 구독 정보를 조회합니다."""
@@ -94,4 +130,31 @@ def update_model_usage(db: Session, user_id: str, model_name: str) -> Optional[S
         return None
     except Exception as e:
         db.rollback()
-        raise e 
+        raise e
+
+def create_subscription(
+    db: Session, 
+    user_id: str, 
+    plan: SubscriptionPlan = SubscriptionPlan.FREE
+) -> Subscription:
+    """새로운 구독을 생성합니다."""
+    # 현재 시간 + 30일을 기본 만료일로 설정
+    current_time = get_kr_time()
+    end_date = current_time + timedelta(days=30)
+    
+    # 플랜에 따른 기본 토큰 한도 설정
+    monthly_token_limit = get_plan_token_limit(plan)
+    
+    subscription = Subscription(
+        user_id=user_id,
+        plan=plan,
+        start_date=current_time,
+        end_date=end_date,
+        monthly_token_limit=monthly_token_limit,
+        remaining_tokens=monthly_token_limit
+    )
+    
+    db.add(subscription)
+    db.commit()
+    db.refresh(subscription)
+    return subscription 

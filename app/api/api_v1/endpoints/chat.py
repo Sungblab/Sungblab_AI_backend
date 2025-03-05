@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.schemas.chat import (
@@ -33,6 +33,10 @@ import time
 import tiktoken
 from functools import lru_cache
 import google.generativeai as genai
+from app.api import deps
+from app.services.openai_service import OpenAIService
+from app.crud import crud_chat_history
+from app.core.utils import get_kr_time
 
 router = APIRouter()
 client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -1754,4 +1758,60 @@ async def delete_file(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete file: {str(e)}"
+        )
+
+@router.post("", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    AI 모델과 채팅합니다.
+    """
+    # 구독 정보 확인 (이 함수 내에서 만료된 구독은 자동 갱신됨)
+    subscription = crud_subscription.get_subscription(db, str(current_user.id))
+    if not subscription:
+        raise HTTPException(status_code=404, detail="구독 정보를 찾을 수 없습니다.")
+    
+    # 토큰 사용량 확인
+    if subscription.remaining_tokens <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail="이번 달 사용 가능한 토큰을 모두 소진했습니다. 구독을 업그레이드하거나 다음 달까지 기다려주세요."
+        )
+    
+    # OpenAI 서비스 초기화
+    openai_service = OpenAIService()
+    
+    try:
+        # 채팅 응답 생성
+        response = await openai_service.chat_completion(
+            messages=request.messages,
+            model=request.model
+        )
+        
+        # 토큰 사용량 업데이트
+        tokens_used = response.get("usage", {}).get("total_tokens", 0)
+        if tokens_used > 0:
+            crud_subscription.update_token_usage(db, str(current_user.id), tokens_used)
+        
+        # 채팅 기록 저장 (백그라운드 작업)
+        background_tasks.add_task(
+            crud_chat_history.create_chat_history,
+            db=db,
+            user_id=str(current_user.id),
+            messages=request.messages,
+            response=response.get("choices", [{}])[0].get("message", {}).get("content", ""),
+            model=request.model,
+            tokens_used=tokens_used
+        )
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"채팅 요청 처리 중 오류가 발생했습니다: {str(e)}"
         )
