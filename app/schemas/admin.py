@@ -51,4 +51,12 @@ class AdminOverviewResponse(BaseModel):
     user_stats: UserStats
     subscription_stats: SubscriptionStats
     recent_users: List[RecentUserResponse]
-    model_usage_stats: List[ModelUsageStats] 
+    model_usage_stats: List[ModelUsageStats]
+
+class SubscriptionUpdate(BaseModel):
+    plan: SubscriptionPlan
+    update_limits: bool = True
+    
+class ExpiredSubscriptionResponse(BaseModel):
+    total_updated: int
+    updated_users: List[str] 

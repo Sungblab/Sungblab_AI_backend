@@ -4,7 +4,7 @@ from typing import List
 from app.api import deps
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.admin import UserResponse, UserUpdate, AdminOverviewResponse
+from app.schemas.admin import UserResponse, UserUpdate, AdminOverviewResponse, ExpiredSubscriptionResponse
 from app.crud import crud_user, crud_admin
 from app.crud import crud_project
 from app.crud import crud_subscription
@@ -202,4 +202,53 @@ def get_admin_overview(
         raise HTTPException(
             status_code=500,
             detail=f"Overview 데이터를 불러오는데 실패했습니다: {str(e)}"
+        )
+
+@router.post("/subscriptions/reset-expired", response_model=ExpiredSubscriptionResponse)
+def reset_expired_subscriptions(
+    db: Session = Depends(deps.get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    만료된 모든 구독을 무료 플랜으로 초기화합니다.
+    남은 기간이 0일 이하인 구독을 찾아 무료 플랜으로 변경합니다.
+    """
+    try:
+        current_time = get_kr_time()
+        
+        # 만료된 구독 찾기 (end_date가 현재 시간보다 이전인 경우)
+        expired_subscriptions = db.query(Subscription).filter(
+            Subscription.end_date < current_time,
+            Subscription.plan != SubscriptionPlan.FREE,
+            Subscription.user_id.isnot(None)  # 사용자가 있는 구독만
+        ).all()
+        
+        updated_users = []
+        
+        # 각 만료된 구독을 무료 플랜으로 변경
+        for subscription in expired_subscriptions:
+            subscription.plan = SubscriptionPlan.FREE
+            # 무료 플랜의 기본 한도로 초기화
+            subscription.monthly_token_limit = crud_subscription.get_plan_token_limit(SubscriptionPlan.FREE)
+            subscription.remaining_tokens = subscription.monthly_token_limit
+            
+            # 사용자 ID 저장 (응답용)
+            if subscription.user_id:
+                updated_users.append(subscription.user_id)
+        
+        db.commit()
+        
+        return {
+            "total_updated": len(expired_subscriptions),
+            "updated_users": updated_users
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"만료된 구독 초기화 중 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"만료된 구독을 초기화하는 중 오류가 발생했습니다: {str(e)}"
         ) 
