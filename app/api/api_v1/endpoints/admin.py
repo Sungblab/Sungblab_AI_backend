@@ -8,7 +8,7 @@ from app.schemas.admin import UserResponse, UserUpdate, AdminOverviewResponse
 from app.crud import crud_user, crud_admin
 from app.crud import crud_project
 from app.crud import crud_subscription
-from app.models.subscription import Subscription, SubscriptionPlan, KST
+from app.models.subscription import Subscription, SubscriptionPlan, KST, PLAN_LIMITS
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.core.utils import get_kr_time
@@ -202,4 +202,52 @@ def get_admin_overview(
         raise HTTPException(
             status_code=500,
             detail=f"Overview 데이터를 불러오는데 실패했습니다: {str(e)}"
+        )
+
+@router.post("/subscriptions/renew-expired")
+def renew_expired_subscriptions(
+    db: Session = Depends(deps.get_db),
+    _: User = Depends(get_current_admin)
+):
+    """만료된 모든 구독을 갱신합니다."""
+    try:
+        current_time = get_kr_time()
+        
+        # 만료된 구독 조회
+        expired_subscriptions = db.query(Subscription).filter(
+            Subscription.end_date < current_time
+        ).all()
+        
+        renewed_count = 0
+        for subscription in expired_subscriptions:
+            # 구독 갱신
+            subscription.start_date = current_time
+            subscription.end_date = current_time + timedelta(days=30)
+            subscription.renewal_date = subscription.end_date
+            subscription.status = "active"
+            
+            # 무료 플랜으로 설정 (유료 플랜이었다면)
+            if subscription.plan != SubscriptionPlan.FREE:
+                subscription.plan = SubscriptionPlan.FREE
+                subscription.group_limits = PLAN_LIMITS[SubscriptionPlan.FREE]
+            
+            # 사용량 초기화
+            subscription.reset_usage()
+            
+            renewed_count += 1
+        
+        db.commit()
+        
+        return {
+            "message": f"{renewed_count}개의 만료된 구독이 갱신되었습니다.",
+            "renewed_count": renewed_count
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"구독 갱신 중 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"구독 갱신 중 오류가 발생했습니다: {str(e)}"
         ) 
