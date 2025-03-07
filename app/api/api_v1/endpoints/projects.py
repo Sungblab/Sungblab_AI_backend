@@ -93,11 +93,11 @@ RECORD_PROMPT = {
 # 프로젝트 타입별 기본 설정
 PROJECT_DEFAULT_SETTINGS = {
     "assignment": {
-        "max_tokens": 4096,  # 수행평가는 긴 설명이 필요할 수 있음
+        "max_tokens": 8192,  # 수행평가는 긴 설명이 필요할 수 있음
         "temperature": 0.7   # 창의적인 답변 허용
     },
     "record": {
-        "max_tokens": 4096,  # 생기부는 비교적 짧고 명확하게
+        "max_tokens": 8192,  # 생기부는 비교적 짧고 명확하게
         "temperature": 0.3   # 보수적이고 안정적인 답변
     }
 }
@@ -122,7 +122,7 @@ DEEPSEEK_MODELS = ["deepseek-reasoner"]
 DEEPSEEK_DEFAULT_CONFIG = {
     "deepseek-reasoner": {
         "temperature": 0.7,
-        "max_tokens": 2048,
+        "max_tokens": 8192,
         "top_p": 0.95,
         "stream": True
     },
@@ -684,7 +684,7 @@ async def stream_project_chat(
 
                 # 프로젝트 설정
                 default_settings = PROJECT_DEFAULT_SETTINGS.get(project.type, {
-                    "max_tokens": 4096,
+                    "max_tokens": 8192,
                     "temperature": 0.7
                 })
                 

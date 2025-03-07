@@ -54,8 +54,8 @@ CLAUDE_CACHE_MODELS = [
 
 # 캐시 관련 상수 정의
 CACHE_MIN_TOKENS = {
-    "claude-3-7-sonnet-20250219": 1024,
-    "claude-3-5-haiku-20241022": 2048,
+    "claude-3-7-sonnet-20250219": 4096,
+    "claude-3-5-haiku-20241022": 4096,
 }
 
 # DeepSeek 관련 상수 추가
@@ -63,7 +63,7 @@ DEEPSEEK_MODELS = ["deepseek-reasoner"]
 DEEPSEEK_DEFAULT_CONFIG = {
     "deepseek-reasoner": {
         "temperature": 0.7,
-        "max_tokens": 2048,
+        "max_tokens": 8192,
         "top_p": 0.95,
         "stream": True
     }
@@ -72,7 +72,7 @@ DEEPSEEK_DEFAULT_CONFIG = {
 # DeepSeek 토큰 제한
 DEEPSEEK_MAX_TOKENS = {
     "deepseek-reasoner": {
-        "max_total_tokens": 16384,
+        "max_total_tokens": 8192,
         "max_input_tokens": 8192,
         "max_output_tokens": 8192
     }
@@ -677,7 +677,7 @@ async def generate_stream_response(
         input_tokens = await count_tokens(request, file_data_list, file_types)
 
         # 기본 설정
-        max_tokens = 2048
+        max_tokens = 8192
         temperature = 0.7
 
         messages = []
@@ -1131,7 +1131,7 @@ async def generate_prompt(
             # Claude API 호출
             response = await client.messages.create(
                 model="claude-3-5-haiku-20241022",
-                max_tokens=1000,
+                max_tokens=2048,
                 system=system_message["text"],
                 messages=[
                     {
