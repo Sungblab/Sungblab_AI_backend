@@ -56,10 +56,19 @@ async def get_table_data(
             })
 
         # 테이블 데이터 조회
-        if table_name == "chat_messages":
+        sorted_tables = ["chat_messages", "project_messages", "projectchat", "projects"]
+        
+        if table_name in sorted_tables:
             query = text(f"SELECT * FROM {table_name} ORDER BY updated_at ASC")
         else:
-            query = text(f"SELECT * FROM {table_name}")
+            columns_info = inspector.get_columns(table_name)
+            has_updated_at = any(col["name"] == "updated_at" for col in columns_info)
+            
+            if has_updated_at:
+                query = text(f"SELECT * FROM {table_name} ORDER BY updated_at ASC")
+            else:
+                query = text(f"SELECT * FROM {table_name}")
+                
         result = db.execute(query)
         rows = [dict(row._mapping) for row in result]
 
