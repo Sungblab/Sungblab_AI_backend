@@ -56,7 +56,10 @@ async def get_table_data(
             })
 
         # 테이블 데이터 조회
-        query = text(f"SELECT * FROM {table_name}")
+        if table_name == "chat_messages":
+            query = text(f"SELECT * FROM {table_name} ORDER BY updated_at ASC")
+        else:
+            query = text(f"SELECT * FROM {table_name}")
         result = db.execute(query)
         rows = [dict(row._mapping) for row in result]
 
