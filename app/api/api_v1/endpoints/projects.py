@@ -24,6 +24,8 @@ from io import BytesIO
 from openai import AsyncOpenAI
 import google.generativeai as genai
 import asyncio
+import tempfile
+import os
 
 # 기본 시스템 프롬프트 (공통)
 BRIEF_SYSTEM_PROMPT = {
@@ -112,7 +114,7 @@ ALLOWED_MODELS = [
     "deepseek-reasoner",
     "gemini-2.0-flash",
 ]
-MULTIMODAL_MODELS = ["claude-3-7-sonnet-20250219"]  # 멀티모달을 지원하는 모델 리스트
+MULTIMODAL_MODELS = ["claude-3-7-sonnet-20250219", "gemini-2.0-flash"]  # Gemini 모델 추가
 MAX_FILE_SIZE = 32 * 1024 * 1024  # 32MB
 MAX_PDF_PAGES = 100
 MAX_IMAGE_DIMENSION = 8000
@@ -510,14 +512,42 @@ async def stream_project_chat(
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found")
             
-            # 첫 메시지 여부 확인
-            is_first_message = len(request_data["messages"]) <= 1
+            # 파일 처리
+            file_data_list = []
+            file_types = []
+            file_info_list = []
+            if files:
+                if request_data["model"] not in MULTIMODAL_MODELS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Selected model does not support file attachments. Please use Claude 3 Sonnet or Gemini 2.0 Flash for files."
+                    )
+                
+                if len(files) > 3:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Maximum 3 files can be uploaded at once."
+                    )
+                
+                for file in files:
+                    try:
+                        await validate_file(file)
+                        file_data, file_type = await process_file_to_base64(file)
+                        file_data_list.append(file_data)
+                        file_types.append(file_type)
+                        file_info_list.append({
+                            "type": file_type,
+                            "name": file.filename,
+                            "data": file_data
+                        })
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=f"Failed to process file {file.filename}")
             
             # 사용자 메시지 저장
             user_message = {
                 "content": request_data["messages"][-1]["content"] if request_data["messages"] else "",
                 "role": "user",
-                "files": None,
+                "files": file_info_list if file_info_list else None,
                 "citations": None,
                 "reasoning_content": None,
                 "thought_time": None
@@ -539,11 +569,14 @@ async def stream_project_chat(
             
             return StreamingResponse(
                 generate_gemini_stream_response(
-                    messages=messages,  # 전체 메시지 이력 전달
+                    messages=messages,
                     model=request_data["model"],
                     room_id=chat_id,
                     db=db,
-                    user_id=current_user.id
+                    user_id=current_user.id,
+                    file_data_list=file_data_list,
+                    file_types=file_types,
+                    file_names=[f.filename for f in files] if files else None
                 ),
                 media_type="text/event-stream"
             )
@@ -922,7 +955,10 @@ async def generate_gemini_stream_response(
     model: str,
     room_id: str,
     db: Session,
-    user_id: str
+    user_id: str,
+    file_data_list: Optional[List[str]] = None,
+    file_types: Optional[List[str]] = None,
+    file_names: Optional[List[str]] = None
 ) -> AsyncGenerator[str, None]:
     try:
         # Gemini 클라이언트 생성
@@ -962,13 +998,90 @@ async def generate_gemini_stream_response(
         prompt = f"{system_prompt}\n\n"
         prompt += "\n".join(conversation_history)
         
+        # 파일 처리
+        file_refs = []
+        contents = []
+        
+        # 대화 컨텍스트를 첫 번째 콘텐츠로 추가
+        contents.append(prompt)
+        
+        # 텍스트 프롬프트 추출 (마지막 메시지)
+        text_prompt = ""
+        if messages and len(messages) > 0:
+            text_prompt = messages[-1].get("content", "")
+        
+        # 파일 처리
+        if file_data_list and file_types:
+            for i, (file_data, file_type) in enumerate(zip(file_data_list, file_types)):
+                file_name = file_names[i] if file_names and i < len(file_names) else f"file_{i}.{file_type.split('/')[-1]}"
+                
+                # 파일 크기 확인
+                file_size = len(base64.b64decode(file_data))
+                
+                if file_size > 20 * 1024 * 1024:  # 20MB 이상인 경우 File API 사용
+                    file_ref = await upload_file_to_gemini(
+                        base64.b64decode(file_data),
+                        file_type,
+                        file_name
+                    )
+                    file_refs.append(file_ref)
+                    contents.append(file_ref)
+                else:
+                    # 이미지 파일이나 PDF 파일인 경우
+                    if file_type.startswith("image/") or file_type == "application/pdf":
+                        # 파일 데이터 디코딩
+                        file_data_bytes = base64.b64decode(file_data)
+                        
+                        if file_type == "application/pdf":
+                            try:
+                                # PDF를 직접 처리 - Gemini API의 새로운 방식 사용
+                                import io
+                                
+                                # 파일 객체 생성
+                                file_obj = io.BytesIO(file_data_bytes)
+                                
+                                # 파일 객체를 직접 contents에 추가
+                                contents.append({
+                                    "inline_data": {
+                                        "data": base64.b64encode(file_data_bytes).decode('utf-8'),
+                                        "mime_type": file_type
+                                    }
+                                })
+                            except Exception as e:
+                                print(f"PDF 처리 중 오류 발생: {e}")
+                                # 오류 발생 시 텍스트로 처리
+                                contents.append(f"[PDF 파일: {file_name}]")
+                        else:
+                            # 일반 이미지 처리
+                            try:
+                                img = Image.open(BytesIO(file_data_bytes))
+                                contents.append(img)
+                            except Exception as e:
+                                print(f"이미지 처리 중 오류 발생: {e}")
+                                contents.append(f"[이미지 파일: {file_name}]")
+                    else:
+                        # 다른 파일 타입 처리
+                        try:
+                            file_data_bytes = base64.b64decode(file_data)
+                            
+                            # 기타 문서 파일 처리
+                            contents.append({
+                                "inline_data": {
+                                    "data": base64.b64encode(file_data_bytes).decode('utf-8'),
+                                    "mime_type": file_type
+                                }
+                            })
+                        except Exception as e:
+                            print(f"파일 처리 중 오류 발생: {e}")
+                            contents.append(f"[파일 처리 중 오류 발생: {file_name}]")
+        
         # 입력 토큰 계산
-        token_count = await count_gemini_tokens(prompt, model, gemini_model)
+        token_count = await count_gemini_tokens(text_prompt, model, gemini_model)
         input_tokens = token_count["input_tokens"]
 
         # 스트리밍 응답 생성
         response = gemini_model.generate_content(
-            prompt,
+            contents,
             generation_config=GEMINI_DEFAULT_CONFIG[model],
             stream=True
         )
@@ -977,12 +1090,17 @@ async def generate_gemini_stream_response(
         start_time = datetime.now()
         
         # Gemini의 청크 처리
-        for chunk in response:
-            if hasattr(chunk, 'text'):
-                content_chunk = chunk.text
-                accumulated_content += content_chunk
-                yield f"data: {json.dumps({'content': content_chunk})}\n\n"
-                await asyncio.sleep(0.01)  # 비동기 컨텍스트 유지
+        try:
+            for chunk in response:
+                if hasattr(chunk, 'text'):
+                    content_chunk = chunk.text
+                    accumulated_content += content_chunk
+                    yield f"data: {json.dumps({'content': content_chunk})}\n\n"
+                    await asyncio.sleep(0.01)  # 비동기 컨텍스트 유지
+        except Exception as e:
+            error_message = f"Gemini 응답 처리 중 오류 발생: {str(e)}"
+            print(error_message)
+            yield f"data: {json.dumps({'error': error_message})}\n\n"
 
         # 응답 완료 후 메시지 저장
         if accumulated_content:
@@ -1014,8 +1132,62 @@ async def generate_gemini_stream_response(
                     thought_time=thought_time
                 )
             )
+            
+        # 임시 파일 참조 정리
+        for file_ref in file_refs:
+            try:
+                await delete_gemini_file(file_ref.name)
+            except:
+                pass
 
     except Exception as e:
         error_message = f"Error in Gemini streaming: {str(e)}"
         print(error_message)
         yield f"data: {json.dumps({'error': error_message})}\n\n"
+
+# Gemini File API 관련 함수 추가 (chat.py에서 가져옴)
+async def upload_file_to_gemini(file_data: bytes, file_type: str, file_name: str = None) -> dict:
+    """Gemini File API를 사용하여 파일을 업로드합니다."""
+    try:
+        gemini_client = get_gemini_client()
+        if not gemini_client:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API key is not configured"
+            )
+        
+        # 임시 파일 생성
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type.split('/')[-1]}") as temp_file:
+            temp_file.write(file_data)
+            temp_file_path = temp_file.name
+        
+        # Gemini File API를 사용하여 파일 업로드
+        file_ref = gemini_client.files.upload(file=temp_file_path)
+        
+        # 임시 파일 삭제
+        os.unlink(temp_file_path)
+        
+        return file_ref
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload file to Gemini: {str(e)}"
+        )
+
+async def delete_gemini_file(file_id: str) -> bool:
+    """Gemini File API를 사용하여 파일을 삭제합니다."""
+    try:
+        gemini_client = get_gemini_client()
+        if not gemini_client:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API key is not configured"
+            )
+        
+        gemini_client.files.delete(name=file_id)
+        return True
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete file from Gemini: {str(e)}"
+        )
