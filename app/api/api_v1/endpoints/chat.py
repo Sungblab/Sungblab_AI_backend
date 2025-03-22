@@ -396,10 +396,6 @@ async def generate_deepseek_stream_response(
         content = ""
         reasoning_content = ""
 
-        for msg in messages:
-            print(f"Role: {msg['role']}")
-            print(f"Content: {msg['content']}\n")
-
         stream = await client.chat.completions.create(
             model=model,
             messages=messages,
