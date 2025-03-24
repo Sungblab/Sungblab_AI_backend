@@ -1181,10 +1181,7 @@ async def generate_project_sonar_stream_response(
         # 프로젝트 정보 가져오기
         project = crud_project.get(db=db, id=project_id)
         chat_type = f"project_{project.type}" if project and project.type else None
-        
-        for msg in messages:
-            print(f"Role: {msg['role']}")
-            print(f"Content: {msg['content']}\n")
+    
 
         headers = {
             "Authorization": f"Bearer {settings.SONAR_API_KEY}",
@@ -1202,9 +1199,6 @@ async def generate_project_sonar_stream_response(
                 "content": msg["content"]
             })
         
-        for msg in formatted_messages:
-            print(f"Role: {msg['role']}")
-            print(f"Content: {msg['content']}\n")
 
         payload = {
             "model": model,
