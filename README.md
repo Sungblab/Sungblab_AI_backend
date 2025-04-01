@@ -79,8 +79,6 @@ docker-compose up -d
 애플리케이션이 실행되면 다음 URL로 접근할 수 있습니다:
 
 - API: http://localhost:8000
-- API 문서: http://localhost:8000/docs 또는 http://localhost:8000/redoc
-- 프론트엔드: http://localhost:3000
 
 ## 프로젝트 구조
 
