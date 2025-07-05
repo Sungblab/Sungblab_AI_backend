@@ -8,7 +8,6 @@ from fastapi.security import OAuth2PasswordBearer
 from app.core.utils import get_kr_time
 
 from app.core.config import settings
-from app.db.session import get_db
 
 # pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
@@ -43,26 +42,4 @@ def create_access_token(subject: str, expires_delta: Optional[timedelta] = None)
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
-    return encoded_jwt
-
-async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="인증에 실패했습니다.",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError as e:
-        raise credentials_exception
-    
-    from app.crud.crud_user import get_user
-    user = get_user(db, id=user_id)  # String ID 사용
-    if user is None:
-        raise credentials_exception
-    return user 
+    return encoded_jwt 
