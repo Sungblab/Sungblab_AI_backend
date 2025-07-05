@@ -42,4 +42,35 @@ def create_access_token(subject: str, expires_delta: Optional[timedelta] = None)
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
-    return encoded_jwt 
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    from app.api.deps import get_db
+    from app.crud.crud_user import get_user
+    from sqlalchemy.orm import Session
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="인증에 실패했습니다.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError as e:
+        raise credentials_exception
+    
+    # 데이터베이스 세션 생성
+    db_generator = get_db()
+    db = next(db_generator)
+    try:
+        user = get_user(db, id=user_id)  # String ID 사용
+        if user is None:
+            raise credentials_exception
+        return user
+    finally:
+        db.close() 
