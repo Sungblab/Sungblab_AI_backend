@@ -5,7 +5,7 @@ export PYTHONUNBUFFERED=1
 
 # 데이터베이스 연결 대기
 echo "Waiting for database..."
-max_retries=30
+max_retries=60  # 30에서 60으로 증가
 counter=0
 
 # DATABASE_URL에서 호스트와 포트 추출
@@ -23,7 +23,7 @@ do
     fi
     echo "Waiting for database... Attempt $((counter+1))/$max_retries"
     counter=$((counter+1))
-    sleep 2
+    sleep 5  # 2초에서 5초로 증가
 done
 
 if [ $counter -eq $max_retries ]; then
@@ -31,10 +31,27 @@ if [ $counter -eq $max_retries ]; then
     exit 1
 fi
 
-# 데이터베이스 마이그레이션 실행
+# 데이터베이스 마이그레이션 실행 (재시도 로직 추가)
 echo "Running database migrations..."
-alembic upgrade head
+migration_retries=3
+migration_counter=0
 
-# FastAPI 애플리케이션 시작
+while [ $migration_counter -lt $migration_retries ]
+do
+    alembic upgrade head
+    if [ $? -eq 0 ]; then
+        echo "Database migration successful!"
+        break
+    fi
+    echo "Migration failed. Retrying... Attempt $((migration_counter+1))/$migration_retries"
+    migration_counter=$((migration_counter+1))
+    sleep 10
+done
+
+if [ $migration_counter -eq $migration_retries ]; then
+    echo "Migration failed after $migration_retries attempts. Starting without migration."
+fi
+
+# FastAPI 애플리케이션 시작 (워커 수 줄이기)
 echo "Starting FastAPI application..."
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --log-level warning 
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning 

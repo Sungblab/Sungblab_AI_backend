@@ -48,8 +48,12 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     logger.info("Initializing database...")
-    init_db()
-    logger.info("Database initialization complete")
+    try:
+        init_db()
+        logger.info("Database initialization complete")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        logger.warning("Application will start without database initialization")
 
 app.include_router(api_router, prefix=settings.API_V1_STR.strip())
 
