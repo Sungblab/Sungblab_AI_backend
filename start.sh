@@ -31,25 +31,13 @@ if [ $counter -eq $max_retries ]; then
     exit 1
 fi
 
-# 데이터베이스 마이그레이션 실행 (재시도 로직 추가)
-echo "Running database migrations..."
-migration_retries=3
-migration_counter=0
-
-while [ $migration_counter -lt $migration_retries ]
-do
-    alembic upgrade head
-    if [ $? -eq 0 ]; then
-        echo "Database migration successful!"
-        break
-    fi
-    echo "Migration failed. Retrying... Attempt $((migration_counter+1))/$migration_retries"
-    migration_counter=$((migration_counter+1))
-    sleep 10
-done
-
-if [ $migration_counter -eq $migration_retries ]; then
-    echo "Migration failed after $migration_retries attempts. Starting without migration."
+# 데이터베이스 초기화 (Supabase 환경)
+echo "Initializing database..."
+python -c "from app.db.init_db import init_db; init_db()"
+if [ $? -eq 0 ]; then
+    echo "Database initialization successful!"
+else
+    echo "Database initialization failed. Starting without initialization."
 fi
 
 # FastAPI 애플리케이션 시작 (워커 수 줄이기)

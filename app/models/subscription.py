@@ -3,6 +3,9 @@ from sqlalchemy.orm import relationship
 from app.db.base_class import Base
 from datetime import datetime, timedelta
 from app.core.utils import get_kr_time
+from app.core.models import (
+    ModelGroup, PLAN_LIMITS, MODEL_GROUP_MAPPING, ACTIVE_MODELS
+)
 import enum
 import uuid
 import pytz
@@ -12,52 +15,10 @@ KST = pytz.timezone('Asia/Seoul')
 def generate_uuid():
     return str(uuid.uuid4())
 
-# 플랜별 제한량 정의
-PLAN_LIMITS = {
-    "FREE": {
-        "basic_chat": 50,      
-        "normal_analysis": 10,  
-        "advanced_analysis": 5   
-    },
-    "BASIC": {
-        "basic_chat": 200,       # 기본 대화 100회
-        "normal_analysis": 70,   # 일반 분석 50회
-        "advanced_analysis": 50  # 고급 분석 20회
-    },
-    "PREMIUM": {
-        "basic_chat": 500,       # 기본 대화 300회
-        "normal_analysis": 150,  # 일반 분석 150회
-        "advanced_analysis": 100  # 고급 분석 50회
-    }
-}
-
 class SubscriptionPlan(str, enum.Enum):
     FREE = "FREE"
     BASIC = "BASIC"
     PREMIUM = "PREMIUM"
-
-class ModelGroup(str, enum.Enum):
-    BASIC_CHAT = "basic_chat"      
-    NORMAL_ANALYSIS = "normal_analysis" 
-    ADVANCED_ANALYSIS = "advanced_analysis"  
-class AIModel(str, enum.Enum):
-    CLAUDE_SONNET = "claude-3-7-sonnet-20250219"
-    CLAUDE_HAIKU = "claude-3-5-haiku-20241022"
-    SONAR_PRO = "sonar-pro"
-    SONAR = "sonar"
-    DEEPSEEK_REASONER = "deepseek-reasoner"
-    GEMINI_FLASH = "gemini-2.0-flash"
-
-# 모델 그룹 매핑
-MODEL_GROUP_MAPPING = {
-    "claude-3-5-haiku-20241022": ModelGroup.BASIC_CHAT,
-    "sonar": ModelGroup.NORMAL_ANALYSIS,
-    "sonar-reasoning": ModelGroup.NORMAL_ANALYSIS,  
-    "deepseek-reasoner": ModelGroup.NORMAL_ANALYSIS,
-    "claude-3-7-sonnet-20250219": ModelGroup.ADVANCED_ANALYSIS,
-    "sonar-pro": ModelGroup.ADVANCED_ANALYSIS,
-    "gemini-2.0-flash": ModelGroup.BASIC_CHAT,  
-}
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -126,7 +87,7 @@ class Subscription(Base):
 
     def get_model_group(self, model_name: str) -> str:
         """모델 이름으로 해당 그룹을 반환합니다."""
-        return MODEL_GROUP_MAPPING.get(model_name)
+        return MODEL_GROUP_MAPPING.get(model_name, "")
 
     def can_use_model(self, model_name: str) -> bool:
         """특정 모델 사용 가능 여부를 확인합니다."""

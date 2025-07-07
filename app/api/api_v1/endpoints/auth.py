@@ -31,10 +31,22 @@ class EmailVerificationCodeRequest(BaseModel):
     email: EmailStr
     verification_code: str
 
-@router.post("/signup", response_model=User)
+@router.post("/signup", response_model=User, summary="사용자 회원가입")
 def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
     """
-    일반 회원가입
+    새로운 사용자 회원가입
+    
+    - **email**: 사용자 이메일 주소 (필수, 이메일 인증 완료 필요)
+    - **password**: 비밀번호 (필수, 최소 8자 이상)
+    - **full_name**: 사용자 이름 (필수)
+    - **is_student**: 학생 여부 (선택)
+    
+    **주의사항:**
+    - 이메일 인증이 완료된 이메일만 회원가입 가능
+    - 이미 가입된 이메일로는 재가입 불가
+    
+    **응답:**
+    - 생성된 사용자 정보 반환
     """
     # 이미 가입된 이메일인지 확인
     user = crud_user.get_user_by_email(db, email=user_in.email)
@@ -60,12 +72,28 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
             detail=str(e)
         )
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=Token, summary="사용자 로그인 (Form 방식)")
 def login(
     db: Session = Depends(get_db),
     form_data: OAuth2PasswordRequestForm = Depends(),
     remember_me: bool = Form(False)
 ):
+    """
+    사용자 로그인 (OAuth2 Form 방식)
+    
+    - **username**: 사용자 이메일 주소
+    - **password**: 비밀번호
+    - **remember_me**: 로그인 유지 여부 (선택, 기본값: False)
+    
+    **토큰 만료 시간:**
+    - 일반 로그인: 24시간
+    - 로그인 유지 선택시: 30일
+    
+    **응답:**
+    - access_token: JWT 토큰
+    - token_type: "bearer"
+    - expires_in: 토큰 만료 시간 (초 단위)
+    """
     user = crud_user.authenticate(
         db, email=form_data.username, password=form_data.password
     )
@@ -93,11 +121,36 @@ def login(
         "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
     }
 
-@router.post("/login-json", response_model=Token)
+@router.post("/login-json", response_model=Token, summary="사용자 로그인 (JSON 방식)")
 def login_json(
     login_data: LoginRequest,
     db: Session = Depends(get_db)
 ):
+    """
+    사용자 로그인 (JSON 방식)
+    
+    - **email**: 사용자 이메일 주소
+    - **password**: 비밀번호
+    - **remember_me**: 로그인 유지 여부 (선택, 기본값: False)
+    
+    **토큰 만료 시간:**
+    - 일반 로그인: 24시간
+    - 로그인 유지 선택시: 30일
+    
+    **응답:**
+    - access_token: JWT 토큰
+    - token_type: "bearer"
+    - expires_in: 토큰 만료 시간 (초 단위)
+    
+    **예시:**
+    ```json
+    {
+        "email": "user@example.com",
+        "password": "password123",
+        "remember_me": false
+    }
+    ```
+    """
     user = crud_user.authenticate(
         db, email=login_data.email, password=login_data.password
     )

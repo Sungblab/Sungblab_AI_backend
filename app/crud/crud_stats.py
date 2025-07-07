@@ -47,15 +47,20 @@ def create_token_usage(
 
 def get_token_usage(
     db: Session,
-    start_date: datetime,
-    end_date: datetime,
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
     user_id: Optional[str] = None
 ) -> List[TokenUsage]:
     """토큰 사용량 통계를 조회합니다."""
-    query = db.query(TokenUsage).filter(
-        TokenUsage.timestamp >= start_date,
-        TokenUsage.timestamp <= end_date
-    )
+    query = db.query(TokenUsage)
+    
+    # 날짜 필터링 - start_date와 end_date가 모두 제공된 경우에만 적용
+    if start_date is not None and end_date is not None:
+        query = query.filter(TokenUsage.timestamp.between(start_date, end_date))
+    elif start_date is not None:
+        query = query.filter(TokenUsage.timestamp >= start_date)
+    elif end_date is not None:
+        query = query.filter(TokenUsage.timestamp <= end_date)
     
     if user_id:
         query = query.filter(TokenUsage.user_id == user_id)
@@ -64,8 +69,8 @@ def get_token_usage(
 
 def get_token_usage_history(
     db: Session,
-    start: datetime,
-    end: datetime,
+    start: Optional[datetime],
+    end: Optional[datetime],
     user_id: Optional[str] = None
 ) -> List[dict]:
     """토큰 사용 기록을 시간순으로 가져옵니다."""
@@ -80,9 +85,15 @@ def get_token_usage_history(
         User.full_name.label('user_name')
     ).join(
         User, TokenUsage.user_id == User.id
-    ).filter(
-        TokenUsage.timestamp.between(start, end)
     )
+    
+    # 날짜 필터링 - start와 end가 모두 제공된 경우에만 적용
+    if start is not None and end is not None:
+        query = query.filter(TokenUsage.timestamp.between(start, end))
+    elif start is not None:
+        query = query.filter(TokenUsage.timestamp >= start)
+    elif end is not None:
+        query = query.filter(TokenUsage.timestamp <= end)
 
     if user_id:
         query = query.filter(TokenUsage.user_id == user_id)
@@ -108,8 +119,8 @@ def get_token_usage_history(
 
 def get_chat_statistics(
     db: Session,
-    start_date: datetime,
-    end_date: datetime,
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
     user_id: Optional[str] = None
 ) -> Dict:
     """채팅 사용량 통계를 조회합니다."""

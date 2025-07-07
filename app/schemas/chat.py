@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 from pydantic import validator
+from app.core.models import ALLOWED_MODELS
 
 class FileInfo(BaseModel):
     type: str
@@ -81,15 +82,14 @@ class ChatMessageRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessageRequest]
-    model: Literal[
-        "claude-3-7-sonnet-20250219",
-        "claude-3-5-haiku-20241022",
-        "sonar-pro",
-        "sonar",
-        "sonar-reasoning",
-        "deepseek-reasoner",
-        "gemini-2.0-flash",
-    ] = "claude-3-5-haiku-20241022"
+    # 동적으로 허용된 모델 리스트 사용
+    model: str
+    
+    @validator('model')
+    def validate_model(cls, v):
+        if v not in ALLOWED_MODELS:
+            raise ValueError(f'Invalid model. Allowed models: {ALLOWED_MODELS}')
+        return v
 
 class TokenUsage(BaseModel):
     id: str

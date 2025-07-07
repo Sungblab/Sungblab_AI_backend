@@ -8,7 +8,6 @@ python-multipart
 pydantic
 pydantic-settings
 python-dotenv
-anthropic
 pydantic[email]
 PyPDF2
 Pillow
@@ -20,8 +19,14 @@ google-auth
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
-alembic
+supabase
 pytz
 openai
 tiktoken
-google-generativeai
+google-genai
+pgvector
+numpy
+redis
+celery
+prometheus-client
+sentry-sdk[fastapi]

@@ -34,6 +34,9 @@ class ProjectChatBase(BaseModel):
 class ProjectChatCreate(ProjectChatBase):
     pass
 
+class ProjectChatUpdate(ProjectChatBase):
+    pass
+
 class ProjectChat(ProjectChatBase):
     id: str
     project_id: str

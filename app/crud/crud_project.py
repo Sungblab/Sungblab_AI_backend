@@ -3,20 +3,147 @@ from sqlalchemy.orm import Session
 from app.models.project import Project, ProjectChat, ProjectMessage
 from app.models.user import User
 from app.models.subscription import Subscription
-from app.schemas.project import ProjectCreate, ProjectUpdate
+from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectChatCreate, ProjectChatUpdate
 from app.schemas.chat import ChatCreate, ChatUpdate, ChatMessageCreate
 import uuid
 from datetime import datetime
+from app.core.models import get_model_config, ModelProvider
 
-# 파일 상단에 MODEL_GROUP_MAPPING 추가
+# 모델 그룹 매핑 (제미나이만)
 MODEL_GROUP_MAPPING = {
-    "claude-3-7-sonnet-20250219": "claude",
-    "claude-3-5-haiku-20241022": "claude",
-    "sonar-pro": "sonar",
-    "sonar": "sonar",
-    "sonar-reasoning": "sonar",
-    "deepseek-reasoner": "deepseek",
+    "gemini-2.5-pro": "gemini",
+    "gemini-2.5-flash": "gemini",
 }
+
+# 모델별 프로바이더 매핑 - 제미나이만 사용
+def get_model_provider_mapping():
+    from app.core.models import ACTIVE_MODELS
+    mapping = {}
+    for model_name, config in ACTIVE_MODELS.items():
+        if config.provider == ModelProvider.GOOGLE:
+            mapping[model_name] = "gemini"
+        else:
+            mapping[model_name] = "unknown"
+    return mapping
+
+def create_with_owner(
+    db: Session, *, obj_in: ProjectCreate, owner_id: str
+) -> Project:
+    obj_in_data = obj_in.dict()
+    obj_in_data["user_id"] = owner_id
+    obj_in_data["created_at"] = datetime.now()
+    obj_in_data["updated_at"] = datetime.now()
+    db_obj = Project(**obj_in_data)
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    return db_obj
+
+def get_multi_by_owner(
+    db: Session, *, owner_id: str, skip: int = 0, limit: int = 100
+) -> list[Project]:
+    return (
+        db.query(Project)
+        .filter(Project.user_id == owner_id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def create_chat(
+    db: Session, *, project_id: str, obj_in: ProjectChatCreate, owner_id: str, chat_id: Optional[str] = None
+) -> ProjectChat:
+    # 프로젝트 소유권 확인
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == owner_id
+    ).first()
+    if not project:
+        raise ValueError("Project not found or access denied")
+    
+    # 채팅 생성
+    chat_data = obj_in.dict()
+    chat_data["project_id"] = project_id
+    chat_data["user_id"] = owner_id  # user_id 추가
+    chat_data["created_at"] = datetime.now()
+    chat_data["updated_at"] = datetime.now()
+    
+    # 특정 ID가 제공된 경우 사용
+    if chat_id:
+        chat_data["id"] = chat_id
+    
+    db_chat = ProjectChat(**chat_data)
+    db.add(db_chat)
+    db.commit()
+    db.refresh(db_chat)
+    return db_chat
+
+def get_project_chats(
+    db: Session, *, project_id: str, owner_id: str
+) -> list[ProjectChat]:
+    # 프로젝트 소유권 확인
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == owner_id
+    ).first()
+    if not project:
+        return []
+    
+    return db.query(ProjectChat).filter(
+        ProjectChat.project_id == project_id
+    ).all()
+
+def update_chat(
+    db: Session, *, chat_id: str, obj_in: ProjectChatUpdate, project_id: str, owner_id: str
+) -> ProjectChat:
+    # 프로젝트 소유권 확인
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == owner_id
+    ).first()
+    if not project:
+        raise ValueError("Project not found or access denied")
+    
+    # 채팅 업데이트
+    chat = db.query(ProjectChat).filter(
+        ProjectChat.id == chat_id,
+        ProjectChat.project_id == project_id
+    ).first()
+    if not chat:
+        raise ValueError("Chat not found")
+    
+    update_data = obj_in.dict(exclude_unset=True)
+    update_data["updated_at"] = datetime.now()
+    
+    for field, value in update_data.items():
+        setattr(chat, field, value)
+    
+    db.commit()
+    db.refresh(chat)
+    return chat
+
+def delete_chat(
+    db: Session, *, chat_id: str, project_id: str, owner_id: str
+) -> bool:
+    # 프로젝트 소유권 확인
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.user_id == owner_id
+    ).first()
+    if not project:
+        return False
+    
+    # 채팅 삭제
+    chat = db.query(ProjectChat).filter(
+        ProjectChat.id == chat_id,
+        ProjectChat.project_id == project_id
+    ).first()
+    if not chat:
+        return False
+    
+    db.delete(chat)
+    db.commit()
+    return True
 
 def create(db: Session, *, obj_in: ProjectCreate, user_id: str) -> Project:
     db_obj = Project(
@@ -68,31 +195,13 @@ def remove(db: Session, *, id: str) -> Project:
     return obj
 
 # 프로젝트 채팅 관련 CRUD 작업
-def create_chat(db: Session, *, project_id: str, obj_in: ChatCreate, user_id: str) -> ProjectChat:
-    # 프로젝트 타입 가져오기
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise ValueError("Project not found")
-
-    db_obj = ProjectChat(
-        id=str(uuid.uuid4()),
-        name=obj_in.name,
-        project_id=project_id,
-        user_id=user_id,  # 사용자 ID 추가
-        type=project.type  # 항상 부모 프로젝트의 타입을 사용
-    )
-    db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
-    return db_obj
-
 def get_chat(db: Session, *, project_id: str, chat_id: str) -> Optional[ProjectChat]:
     return db.query(ProjectChat).filter(
         ProjectChat.project_id == project_id,
         ProjectChat.id == chat_id
     ).first()
 
-def update_chat(
+def update_chat_by_id(
     db: Session, *, project_id: str, chat_id: str, obj_in: ChatUpdate
 ) -> Dict[str, Any]:
     db_obj = get_chat(db, project_id=project_id, chat_id=chat_id)
@@ -111,8 +220,6 @@ def get_chat_messages(db: Session, *, project_id: str, chat_id: str) -> List[Dic
     chat = get_chat(db, project_id=project_id, chat_id=chat_id)
     if not chat:
         return []
-    
-    # 메시지 조회 전 채팅 정보 출력
     
     # 메시지 직접 쿼리
     messages = db.query(ProjectMessage).filter(
@@ -149,7 +256,7 @@ def create_chat_message(
             content=obj_in.content,
             role=obj_in.role,
             room_id=chat_id,
-            files=[file.dict() for file in obj_in.files] if obj_in.files else None,
+            files=[file if isinstance(file, dict) else file.__dict__ for file in obj_in.files] if obj_in.files else None,
             citations=obj_in.citations,
             reasoning_content=obj_in.reasoning_content,
             thought_time=obj_in.thought_time,

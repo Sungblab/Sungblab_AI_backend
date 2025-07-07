@@ -130,22 +130,15 @@ def get_recent_users(db: Session, limit: int = 3) -> List[User]:
 
 def get_model_usage_stats(db: Session) -> List[Dict]:
     """AI 모델별 사용량 통계를 조회합니다."""
-    now = get_kr_time()
-    month_ago = now - timedelta(days=30)
-
     # 전체 토큰 수
     total_tokens = db.query(
         func.sum(TokenUsage.input_tokens + TokenUsage.output_tokens)
-    ).filter(
-        TokenUsage.created_at >= month_ago
     ).scalar() or 0
 
     # 모델별 사용량
     model_stats = db.query(
         TokenUsage.model,
         func.sum(TokenUsage.input_tokens + TokenUsage.output_tokens).label('total_tokens')
-    ).filter(
-        TokenUsage.created_at >= month_ago
     ).group_by(TokenUsage.model).all()
 
     result = []

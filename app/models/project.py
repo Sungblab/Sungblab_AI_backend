@@ -28,6 +28,7 @@ class Project(Base):
     # Relationships
     user = relationship("User", back_populates="projects")
     chats = relationship("ProjectChat", back_populates="project", cascade="all, delete-orphan")
+    embeddings = relationship("ProjectEmbedding", back_populates="project", cascade="all, delete-orphan")
 
     def to_dict(self, include_chats: bool = True):
         result = {

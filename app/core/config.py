@@ -12,10 +12,6 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     
-    # DeepSeek API 설정
-    DEEPSEEK_API_KEY: Optional[str] = None
-    DEEPSEEK_API_URL: str = "https://api.deepseek.com"
-    
     # 관리자 계정 설정
     ADMIN_EMAIL: str
     ADMIN_NAME: str
@@ -32,11 +28,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     
-    # Claude API 설정
-    ANTHROPIC_API_KEY: str
-    
-    # Sonar API
-    SONAR_API_KEY: str
+    # Gemini API 설정 (유일한 AI API)
+    GEMINI_API_KEY: str
     
     # Email Settings
     SMTP_HOST: str
@@ -51,13 +44,12 @@ class Settings(BaseSettings):
     FRONTEND_URL: str
 
     # CORS 설정
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "https://sungblab.com",
-        "https://www.sungblab.com",
-        "http://localhost:3000"
-    ]
+    BACKEND_CORS_ORIGINS_STR: Optional[str] = None
 
-    # Database
+    # Database (Supabase) - Optional since we're using PostgreSQL directly
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     DATABASE_URL: str
     SQLALCHEMY_DATABASE_URL: Optional[str] = None
 
@@ -65,9 +57,6 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
-
-    # Gemini API 설정
-    GEMINI_API_KEY: str = ""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -77,15 +66,19 @@ class Settings(BaseSettings):
     def assemble_db_url(cls, v: Optional[str], values: dict) -> str:
         if v:
             return v
-        return values.get("DATABASE_URL")
+        return values.get("DATABASE_URL", "")
 
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
-        if isinstance(v, str):
-            if v == "*":
-                return ["*"]
-            return [i.strip() for i in v.split(",")]
-        return v
+    @property
+    def BACKEND_CORS_ORIGINS(self) -> List[str]:
+        if self.BACKEND_CORS_ORIGINS_STR is None or self.BACKEND_CORS_ORIGINS_STR == "":
+            return [
+                "https://sungblab.com",
+                "https://www.sungblab.com",
+                "http://localhost:3000"
+            ]
+        if self.BACKEND_CORS_ORIGINS_STR == "*":
+            return ["*"]
+        return [i.strip() for i in self.BACKEND_CORS_ORIGINS_STR.split(",")]
 
     @validator("SMTP_TLS", pre=True)
     def parse_smtp_tls(cls, v):
