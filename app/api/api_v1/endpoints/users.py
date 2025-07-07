@@ -9,6 +9,9 @@ from app.models.subscription import Subscription
 from app.models.user import User as UserModel
 from app.crud import crud_user
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -69,7 +72,7 @@ def delete_current_user(
         return {"message": "계정이 성공적으로 삭제되었습니다."}
     except Exception as e:
         db.rollback()
-        print(f"계정 삭제 중 오류 발생: {str(e)}")
+        logger.debug(f"계정 삭제 중 오류 발생: {str(e)}")
         # 더 자세한 에러 정보 출력
         import traceback
         traceback.print_exc()

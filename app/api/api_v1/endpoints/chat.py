@@ -84,7 +84,7 @@ async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
         
         # 파일이 Gemini API 제한을 초과하는 경우 File API 사용
         if len(contents) > GEMINI_INLINE_DATA_LIMIT:
-            print(f"Warning: File {file.filename} ({len(contents)} bytes) exceeds Gemini inline data limit. Using File API instead.")
+            logger.debug(f"Warning: File {file.filename} ({len(contents)} bytes) exceeds Gemini inline data limit. Using File API instead.")
             
             # Gemini 클라이언트 생성
             client = get_gemini_client()
@@ -110,18 +110,18 @@ async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
                     try:
                         uploaded_file = client.files.get(name=uploaded_file.name)
                     except Exception as e:
-                        print(f"Error checking file status: {e}")
+                        logger.debug(f"Error checking file status: {e}")
                         break
                 
                 # 처리 상태 확인
                 if uploaded_file.state.name != 'ACTIVE':
-                    print(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
+                    logger.debug(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
                 
                 # File API URI 반환 (base64 대신)
                 return f"FILE_API:{uploaded_file.name}", file.content_type
                 
             except Exception as e:
-                print(f"File API upload failed for {file.filename}: {e}")
+                logger.debug(f"File API upload failed for {file.filename}: {e}")
                 # 폴백: 파일 정보만 전송
                 file_info = f"파일명: {file.filename}, 크기: {len(contents)} bytes, 타입: {file.content_type} (File API 업로드 실패)"
                 base64_data = base64.b64encode(file_info.encode()).decode('utf-8')
@@ -144,7 +144,7 @@ def get_gemini_client():
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         return client
     except Exception as e:
-        print(f"Gemini client creation error: {e}")
+        logger.debug(f"Gemini client creation error: {e}")
         return None
 
 async def count_gemini_tokens(text: str, model: str, client) -> dict:
@@ -159,7 +159,7 @@ async def count_gemini_tokens(text: str, model: str, client) -> dict:
             "output_tokens": 0
         }
     except Exception as e:
-        print(f"Gemini token counting error: {e}")
+        logger.debug(f"Gemini token counting error: {e}")
         return {
             "input_tokens": len(text) // 4,  # 대략적인 토큰 계산
             "output_tokens": 0
@@ -367,7 +367,7 @@ async def generate_gemini_stream_response(
                     total_tokens += msg_token_count
                 else:
                     # 토큰 한계에 도달하면 중단
-                    print(f"Context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
+                    logger.debug(f"Context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
                     break
         
         # 최소한 하나의 메시지는 포함되어야 함
@@ -382,7 +382,7 @@ async def generate_gemini_stream_response(
                 detail="No valid message content found"
             )
         
-        print(f"Context management: Using {len(valid_messages)} messages with {total_tokens} tokens")
+        logger.debug(f"Context management: Using {len(valid_messages)} messages with {total_tokens} tokens")
 
         # 컨텍스트 압축 적용 (필요한 경우)
         if len(valid_messages) > 5:  # 5개 이상 메시지가 있을 때만 압축 고려
@@ -407,9 +407,9 @@ async def generate_gemini_stream_response(
                         # File API 객체로 직접 추가
                         uploaded_file = client.files.get(name=file_uri)
                         contents.append(uploaded_file)
-                        print(f"Added File API file: {file_name} ({file_uri})")
+                        logger.debug(f"Added File API file: {file_name} ({file_uri})")
                     except Exception as e:
-                        print(f"Failed to get File API file {file_uri}: {e}")
+                        logger.debug(f"Failed to get File API file {file_uri}: {e}")
                         # 폴백: 파일 정보 텍스트로 추가
                         contents.append(f"파일: {file_name} (File API 처리 실패)")
                 else:
@@ -550,23 +550,23 @@ async def generate_gemini_stream_response(
                         grounding = candidate.grounding_metadata
                         
                         # 실제 값들 확인
-                        print(f"=== GROUNDING VALUES DEBUG ===")
-                        print(f"web_search_queries: {getattr(grounding, 'web_search_queries', None)}")
-                        print(f"grounding_chunks: {getattr(grounding, 'grounding_chunks', None)}")
-                        print(f"grounding_supports: {getattr(grounding, 'grounding_supports', None)}")
+                        logger.debug(f"=== GROUNDING VALUES DEBUG ===")
+                        logger.debug(f"web_search_queries: {getattr(grounding, 'web_search_queries', None)}")
+                        logger.debug(f"grounding_chunks: {getattr(grounding, 'grounding_chunks', None)}")
+                        logger.debug(f"grounding_supports: {getattr(grounding, 'grounding_supports', None)}")
                         
                         # 웹 검색 쿼리 수집
                         if hasattr(grounding, 'web_search_queries') and grounding.web_search_queries:
-                            print(f"Adding web_search_queries: {grounding.web_search_queries}")
+                            logger.debug(f"Adding web_search_queries: {grounding.web_search_queries}")
                             web_search_queries.extend(grounding.web_search_queries)
                         
                         # grounding_supports에서 citations 추출 시도
                         if hasattr(grounding, 'grounding_supports') and grounding.grounding_supports:
-                            print(f"Found grounding_supports: {len(grounding.grounding_supports)} supports")
+                            logger.debug(f"Found grounding_supports: {len(grounding.grounding_supports)} supports")
                             new_citations = []
                             for i, support in enumerate(grounding.grounding_supports):
-                                print(f"Support {i}: type={type(support)}, dir={dir(support)}")
-                                print(f"Support {i} content: {support}")
+                                logger.debug(f"Support {i}: type={type(support)}, dir={dir(support)}")
+                                logger.debug(f"Support {i} content: {support}")
                                 
                                 # grounding_chunk_indices가 있는지 확인
                                 if hasattr(support, 'grounding_chunk_indices') and support.grounding_chunk_indices:
@@ -575,37 +575,37 @@ async def generate_gemini_stream_response(
                                             grounding.grounding_chunks and 
                                             chunk_idx < len(grounding.grounding_chunks)):
                                             chunk = grounding.grounding_chunks[chunk_idx]
-                                            print(f"Referenced chunk {chunk_idx}: {chunk}")
+                                            logger.debug(f"Referenced chunk {chunk_idx}: {chunk}")
                                             
                                             if hasattr(chunk, 'web') and chunk.web:
                                                 citation = {
                                                     "url": getattr(chunk.web, 'uri', ''),
                                                     "title": getattr(chunk.web, 'title', '')
                                                 }
-                                                print(f"Extracted citation from support: {citation}")
+                                                logger.debug(f"Extracted citation from support: {citation}")
                                                 if citation['url'] and not any(c['url'] == citation['url'] for c in citations):
                                                     citations.append(citation)
                                                     new_citations.append(citation)
                         
                         # 직접 grounding chunks에서도 시도
                         if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                            print(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
+                            logger.debug(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
                             new_citations = []
                             for i, chunk in enumerate(grounding.grounding_chunks):
-                                print(f"Direct chunk {i}: {chunk}")
+                                logger.debug(f"Direct chunk {i}: {chunk}")
                                 if hasattr(chunk, 'web') and chunk.web:
                                     citation = {
                                         "url": getattr(chunk.web, 'uri', ''),
                                         "title": getattr(chunk.web, 'title', '')
                                     }
-                                    print(f"Direct extracted citation: {citation}")
+                                    logger.debug(f"Direct extracted citation: {citation}")
                                     if citation['url'] and not any(c['url'] == citation['url'] for c in citations):
                                         citations.append(citation)
                                         new_citations.append(citation)
                             
                             # 새로운 인용 정보만 전송
                             if new_citations:
-                                print(f"Sending {len(new_citations)} new citations")
+                                logger.debug(f"Sending {len(new_citations)} new citations")
                                 try:
                                     yield f"data: {json.dumps({'citations': new_citations})}\n\n"
                                 except (ConnectionError, BrokenPipeError, GeneratorExit):
@@ -614,7 +614,7 @@ async def generate_gemini_stream_response(
                         
                         # 검색 쿼리 전송
                         if web_search_queries:
-                            print(f"Sending search queries: {web_search_queries}")
+                            logger.debug(f"Sending search queries: {web_search_queries}")
                             try:
                                 yield f"data: {json.dumps({'search_queries': web_search_queries})}\n\n"
                             except (ConnectionError, BrokenPipeError, GeneratorExit):
@@ -682,11 +682,11 @@ async def generate_gemini_stream_response(
         
         # 스트리밍이 정상적으로 완료된 경우에만 DB에 저장
         if streaming_completed and accumulated_content:
-            print(f"=== SAVING MESSAGE DEBUG ===")
-            print(f"streaming_completed: {streaming_completed}")
-            print(f"accumulated_content length: {len(accumulated_content)}")
-            print(f"citations count: {len(citations)}")
-            print(f"citations: {citations}")
+            logger.debug(f"=== SAVING MESSAGE DEBUG ===")
+            logger.debug(f"streaming_completed: {streaming_completed}")
+            logger.debug(f"accumulated_content length: {len(accumulated_content)}")
+            logger.debug(f"citations count: {len(citations)}")
+            logger.debug(f"citations: {citations}")
             message_create = ChatMessageCreate(
                 content=accumulated_content,
                 role="assistant",
@@ -696,15 +696,15 @@ async def generate_gemini_stream_response(
                 citations=citations if citations else None
             )
             saved_message = crud_chat.create_message(db, room_id, message_create)
-            print(f"Message saved with ID: {saved_message.id}")
-            print(f"Saved message citations: {saved_message.citations}")
-            print(f"=== END SAVING DEBUG ===")
+            logger.debug(f"Message saved with ID: {saved_message.id}")
+            logger.debug(f"Saved message citations: {saved_message.citations}")
+            logger.debug(f"=== END SAVING DEBUG ===")
         else:
-            print(f"=== MESSAGE NOT SAVED ===")
-            print(f"streaming_completed: {streaming_completed}")
-            print(f"accumulated_content: {bool(accumulated_content)}")
-            print(f"Reason: {'Streaming was interrupted' if not streaming_completed else 'No content'}")
-            print(f"=== END NOT SAVED DEBUG ===")
+            logger.debug(f"=== MESSAGE NOT SAVED ===")
+            logger.debug(f"streaming_completed: {streaming_completed}")
+            logger.debug(f"accumulated_content: {bool(accumulated_content)}")
+            logger.debug(f"Reason: {'Streaming was interrupted' if not streaming_completed else 'No content'}")
+            logger.debug(f"=== END NOT SAVED DEBUG ===")
 
     except Exception as e:
         error_message = f"Stream Generation Error: {str(e)}"
@@ -1419,23 +1419,23 @@ async def search_web(
                             grounding = candidate.grounding_metadata
                             
                             # 디버깅: grounding metadata 구조 확인 (검색용)
-                            print(f"=== SEARCH GROUNDING METADATA DEBUG ===")
-                            print(f"grounding type: {type(grounding)}")
-                            print(f"grounding dir: {dir(grounding)}")
+                            logger.debug(f"=== SEARCH GROUNDING METADATA DEBUG ===")
+                            logger.debug(f"grounding type: {type(grounding)}")
+                            logger.debug(f"grounding dir: {dir(grounding)}")
                             
                             # 웹 검색 쿼리 수집
                             if hasattr(grounding, 'web_search_queries') and grounding.web_search_queries:
-                                print(f"Found web_search_queries: {grounding.web_search_queries}")
+                                logger.debug(f"Found web_search_queries: {grounding.web_search_queries}")
                                 web_search_queries.extend(grounding.web_search_queries)
                             
                             # grounding chunks에서 citations 추출
                             if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                                print(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
+                                logger.debug(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
                                 new_citations = []
                                 for i, chunk in enumerate(grounding.grounding_chunks):
-                                    print(f"Search Chunk {i}: type={type(chunk)}, dir={dir(chunk)}")
+                                    logger.debug(f"Search Chunk {i}: type={type(chunk)}, dir={dir(chunk)}")
                                     if hasattr(chunk, 'web') and chunk.web:
-                                        print(f"Search Chunk {i} web: type={type(chunk.web)}, dir={dir(chunk.web)}")
+                                        logger.debug(f"Search Chunk {i} web: type={type(chunk.web)}, dir={dir(chunk.web)}")
                                         citation_url = chunk.web.uri
                                         # 중복 방지
                                         if citation_url not in citations_sent:
@@ -1443,14 +1443,14 @@ async def search_web(
                                                 "url": citation_url,
                                                 "title": chunk.web.title if hasattr(chunk.web, 'title') else ""
                                             }
-                                            print(f"Search extracted citation: {citation}")
+                                            logger.debug(f"Search extracted citation: {citation}")
                                             citations.append(citation)
                                             new_citations.append(citation)
                                             citations_sent.add(citation_url)
                                 
                                 # 새로운 인용 정보만 전송
                                 if new_citations:
-                                    print(f"Search sending {len(new_citations)} new citations")
+                                    logger.debug(f"Search sending {len(new_citations)} new citations")
                                     try:
                                         yield f"data: {json.dumps({'citations': new_citations})}\n\n"
                                     except (ConnectionError, BrokenPipeError, GeneratorExit):
@@ -1483,9 +1483,9 @@ async def search_web(
             
             # 검색이 정상적으로 완료된 경우에만 DB에 저장
             if search_completed and accumulated_content:
-                print(f"=== SEARCH SAVING DEBUG ===")
-                print(f"search_completed: {search_completed}")
-                print(f"Saving search response with {len(citations)} citations: {citations}")
+                logger.debug(f"=== SEARCH SAVING DEBUG ===")
+                logger.debug(f"search_completed: {search_completed}")
+                logger.debug(f"Saving search response with {len(citations)} citations: {citations}")
                 ai_message = ChatMessageCreate(
                     content=accumulated_content,
                     role="assistant",
@@ -1493,14 +1493,14 @@ async def search_web(
                     citations=citations if citations else None
                 )
                 saved_message = crud_chat.create_message(db, room_id, ai_message)
-                print(f"Saved message citations: {saved_message.citations}")
-                print(f"=== END SEARCH SAVING DEBUG ===")
+                logger.debug(f"Saved message citations: {saved_message.citations}")
+                logger.debug(f"=== END SEARCH SAVING DEBUG ===")
             else:
-                print(f"=== SEARCH MESSAGE NOT SAVED ===")
-                print(f"search_completed: {search_completed}")
-                print(f"accumulated_content: {bool(accumulated_content)}")
-                print(f"Reason: {'Search was interrupted' if not search_completed else 'No content'}")
-                print(f"=== END SEARCH NOT SAVED DEBUG ===")
+                logger.debug(f"=== SEARCH MESSAGE NOT SAVED ===")
+                logger.debug(f"search_completed: {search_completed}")
+                logger.debug(f"accumulated_content: {bool(accumulated_content)}")
+                logger.debug(f"Reason: {'Search was interrupted' if not search_completed else 'No content'}")
+                logger.debug(f"=== END SEARCH NOT SAVED DEBUG ===")
         
         return StreamingResponse(
             generate_search_stream(),
@@ -1572,7 +1572,7 @@ async def get_or_create_chat_session(
         
         return chat_session
     except Exception as e:
-        print(f"Chat session creation error: {e}")
+        logger.debug(f"Chat session creation error: {e}")
         return None
 
 async def compress_context_if_needed(
@@ -1592,7 +1592,7 @@ async def compress_context_if_needed(
     if total_tokens < max_tokens * CONTEXT_COMPRESSION_THRESHOLD:
         return messages
     
-    print(f"Context compression needed: {total_tokens} tokens > {max_tokens * CONTEXT_COMPRESSION_THRESHOLD}")
+    logger.debug(f"Context compression needed: {total_tokens} tokens > {max_tokens * CONTEXT_COMPRESSION_THRESHOLD}")
     
     # 최신 메시지는 유지하고 오래된 메시지들을 요약
     keep_recent = 3  # 최근 3개 메시지 유지
@@ -1624,11 +1624,11 @@ async def compress_context_if_needed(
             {"role": "system", "content": f"이전 대화 요약: {summary_response.text}"}
         ] + recent_messages
         
-        print(f"Context compressed: {len(messages)} -> {len(compressed_messages)} messages")
+        logger.debug(f"Context compressed: {len(messages)} -> {len(compressed_messages)} messages")
         return compressed_messages
         
     except Exception as e:
-        print(f"Context compression error: {e}")
+        logger.debug(f"Context compression error: {e}")
         return messages[-keep_recent:]  # 실패시 최근 메시지만 유지
 
 class StreamingBuffer:
@@ -1775,7 +1775,7 @@ async def generate_anonymous_gemini_stream_response(
             crud_anonymous_usage.increment_usage(db, session_id, ip_address)
             
     except Exception as e:
-        print(f"Anonymous chat error: {e}")
+        logger.debug(f"Anonymous chat error: {e}")
         yield f"data: {json.dumps({'error': '죄송합니다. 일시적인 오류가 발생했습니다.'})}\n\n"
 
 
@@ -1850,7 +1850,7 @@ async def anonymous_chat(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Anonymous chat error: {e}")
+        logger.debug(f"Anonymous chat error: {e}")
         raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
 
 
@@ -1883,7 +1883,7 @@ async def get_anonymous_usage(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Anonymous usage check error: {e}")
+        logger.debug(f"Anonymous usage check error: {e}")
         raise HTTPException(status_code=500, detail="사용량 조회 중 오류가 발생했습니다.")
 
 
@@ -1903,7 +1903,7 @@ async def create_anonymous_session(request: Request):
         }
         
     except Exception as e:
-        print(f"Anonymous session creation error: {e}")
+        logger.debug(f"Anonymous session creation error: {e}")
         raise HTTPException(status_code=500, detail="세션 생성 중 오류가 발생했습니다.")
 
 
@@ -1929,5 +1929,5 @@ async def get_anonymous_stats(
         return stats
         
     except Exception as e:
-        print(f"Anonymous stats error: {e}")
+        logger.debug(f"Anonymous stats error: {e}")
         raise HTTPException(status_code=500, detail="통계 조회 중 오류가 발생했습니다.")

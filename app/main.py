@@ -25,7 +25,7 @@ logging.getLogger("alembic").setLevel(logging.WARNING)
 # 구조화된 로깅 초기화
 structured_logger = StructuredLogger("sungblab_api")
 logger = logging.getLogger("sungblab_api")
-logger.setLevel(settings.LOG_LEVEL)
+logger.setLevel(settings.effective_log_level)
 
 # OpenAPI 메타데이터 설정
 description = """

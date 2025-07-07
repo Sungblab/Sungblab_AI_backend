@@ -7,6 +7,9 @@ import hashlib
 from app.core.config import settings
 from functools import wraps
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CacheManager:
     """통합 캐시 관리자"""
@@ -32,7 +35,7 @@ class CacheManager:
             serialized_value = pickle.dumps(value)
             return self.redis_client.setex(key, ttl, serialized_value)
         except Exception as e:
-            print(f"Cache set error: {e}")
+            logger.debug(f"Cache set error: {e}")
             return False
     
     def get(self, key: str) -> Optional[Any]:
@@ -43,7 +46,7 @@ class CacheManager:
                 return pickle.loads(serialized_value)
             return None
         except Exception as e:
-            print(f"Cache get error: {e}")
+            logger.debug(f"Cache get error: {e}")
             return None
     
     def delete(self, key: str) -> bool:
@@ -51,7 +54,7 @@ class CacheManager:
         try:
             return bool(self.redis_client.delete(key))
         except Exception as e:
-            print(f"Cache delete error: {e}")
+            logger.debug(f"Cache delete error: {e}")
             return False
     
     def exists(self, key: str) -> bool:
@@ -59,7 +62,7 @@ class CacheManager:
         try:
             return bool(self.redis_client.exists(key))
         except Exception as e:
-            print(f"Cache exists error: {e}")
+            logger.debug(f"Cache exists error: {e}")
             return False
     
     def clear_pattern(self, pattern: str) -> int:
@@ -70,7 +73,7 @@ class CacheManager:
                 return self.redis_client.delete(*keys)
             return 0
         except Exception as e:
-            print(f"Cache clear pattern error: {e}")
+            logger.debug(f"Cache clear pattern error: {e}")
             return 0
 
 # 전역 캐시 매니저

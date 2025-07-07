@@ -112,7 +112,7 @@ def delete_user(
         return {"message": "사용자가 삭제되었습니다."}
     except Exception as e:
         db.rollback()
-        print(f"사용자 삭제 중 오류 발생: {str(e)}")
+        logger.debug(f"사용자 삭제 중 오류 발생: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
@@ -196,7 +196,7 @@ def get_admin_overview(
         }
         
     except Exception as e:
-        print(f"Overview 데이터 조회 중 오류 발생: {str(e)}")
+        logger.debug(f"Overview 데이터 조회 중 오류 발생: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
@@ -244,7 +244,7 @@ def renew_expired_subscriptions(
         }
     except Exception as e:
         db.rollback()
-        print(f"구독 갱신 중 오류 발생: {str(e)}")
+        logger.debug(f"구독 갱신 중 오류 발생: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
