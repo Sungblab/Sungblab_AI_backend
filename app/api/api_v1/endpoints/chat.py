@@ -16,6 +16,8 @@ from app.core.config import settings
 import logging
 import base64
 from typing import Optional, List, AsyncGenerator, Dict, Any, Set
+
+logger = logging.getLogger(__name__)
 import os
 from datetime import datetime, timezone
 from app.models.subscription import Subscription
