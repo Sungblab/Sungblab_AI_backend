@@ -86,14 +86,21 @@ def create_message(db: Session, room_id: str, message: ChatMessageCreate) -> Cha
         raise e
 
 def get_room_messages(db: Session, room_id: str, user_id: str) -> List[ChatMessage]:
-    # 먼저 채팅방이 해당 사용자의 것인지 확인
-    room = db.query(ChatRoom).filter(
-        ChatRoom.id == room_id,
-        ChatRoom.user_id == user_id
-    ).first()
+    # 먼저 채팅방이 존재하는지 확인
+    room_exists = db.query(ChatRoom).filter(ChatRoom.id == room_id).first()
     
-    if not room:
-        raise HTTPException(status_code=404, detail="Chat room not found")
+    if not room_exists:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"채팅방을 찾을 수 없습니다. 채팅방 목록을 새로고침해주세요. (Room ID: {room_id})"
+        )
+    
+    # 채팅방이 해당 사용자의 것인지 확인
+    if room_exists.user_id != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="이 채팅방에 접근할 권한이 없습니다."
+        )
     
     # created_at으로 정렬하되, 같은 시간대의 메시지는 id로 정렬
     return db.query(ChatMessage).filter(
@@ -109,7 +116,10 @@ def update_chat_room(db: Session, room_id: str, room: ChatRoomCreate, user_id: s
         ChatRoom.user_id == user_id
     ).first()
     if not db_room:
-        raise HTTPException(status_code=404, detail="Chat room not found")
+        raise HTTPException(
+            status_code=404, 
+            detail="채팅방을 찾을 수 없습니다. 채팅방 목록을 새로고침해주세요."
+        )
     
     db_room.name = room.name
     db_room.updated_at = get_kr_time()
@@ -118,10 +128,18 @@ def update_chat_room(db: Session, room_id: str, room: ChatRoomCreate, user_id: s
     return db_room
 
 def get_chat_room(db: Session, room_id: str, user_id: str) -> ChatRoom:
-    return db.query(ChatRoom).filter(
+    room = db.query(ChatRoom).filter(
         ChatRoom.id == room_id,
         ChatRoom.user_id == str(user_id)
-    ).first() 
+    ).first()
+    
+    if not room:
+        raise HTTPException(
+            status_code=404, 
+            detail="채팅방을 찾을 수 없습니다. 채팅방 목록을 새로고침해주세요."
+        )
+    
+    return room
 
 def get_message_count(db: Session, room_id: str) -> int:
     """특정 채팅방의 메시지 수를 반환합니다."""
