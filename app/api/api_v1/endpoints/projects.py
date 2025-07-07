@@ -21,9 +21,6 @@ import asyncio
 import io
 import time
 import hashlib
-import logging
-
-logger = logging.getLogger(__name__)
 
 # 새로운 Google Genai 라이브러리 import
 from google import genai
@@ -401,7 +398,7 @@ def get_gemini_client():
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         return client
     except Exception as e:
-        logger.debug(f"Gemini client creation error: {e}")
+        print(f"Gemini client creation error: {e}")
         return None
 
 async def count_gemini_tokens(text: str, model: str, client) -> dict:
@@ -416,11 +413,129 @@ async def count_gemini_tokens(text: str, model: str, client) -> dict:
             "output_tokens": 0
         }
     except Exception as e:
-        logger.debug(f"Gemini token counting error: {e}")
+        print(f"Gemini token counting error: {e}")
         return {
             "input_tokens": len(text) // 4,  # 대략적인 토큰 계산
             "output_tokens": 0
         }
+
+async def get_optimized_project_thinking_config(
+    model: str, 
+    project_type: str = "general",
+    complexity_level: str = "normal"
+) -> Optional[types.ThinkingConfig]:
+    """프로젝트별 최적화된 사고 설정 생성"""
+    if model not in PROJECT_THINKING_OPTIMIZATION:
+        return None
+    
+    config = PROJECT_THINKING_OPTIMIZATION[model]
+    
+    # 복잡도 레벨 기반 조정
+    if complexity_level == "simple":
+        budget = config["default_budget"] // 2
+    elif complexity_level == "complex":
+        budget = config["max_budget"]
+    else:
+        budget = config["default_budget"]
+    
+    # 프로젝트 타입별 추가 조정
+    if project_type == "assignment":
+        # 수행평가는 더 많은 사고 예산 필요
+        budget = min(budget * 2, config["max_budget"])
+    elif project_type == "record":
+        # 생기부 작성은 중간 정도의 사고 예산
+        budget = min(int(budget * 1.5), config["max_budget"])
+    
+    return types.ThinkingConfig(
+        thinking_budget=budget,
+        include_thoughts=budget > 0
+    )
+
+async def compress_project_context_if_needed(
+    client,
+    model: str,
+    messages: List[dict],
+    max_tokens: int,
+    project_type: Optional[str] = None
+) -> List[dict]:
+    """프로젝트 컨텍스트 압축 (필요한 경우)"""
+    # 토큰 수 계산
+    total_tokens = 0
+    for msg in messages:
+        token_count = await count_gemini_tokens(msg["content"], model, client)
+        total_tokens += token_count.get("input_tokens", 0)
+    
+    # 압축이 필요한지 확인
+    if total_tokens < max_tokens * PROJECT_CONTEXT_COMPRESSION_THRESHOLD:
+        return messages
+    
+    print(f"Project context compression needed: {total_tokens} tokens > {max_tokens * PROJECT_CONTEXT_COMPRESSION_THRESHOLD}")
+    
+    # 최신 메시지는 유지하고 오래된 메시지들을 요약
+    keep_recent = 5  # 프로젝트는 더 많은 최근 메시지 유지
+    recent_messages = messages[-keep_recent:]
+    old_messages = messages[:-keep_recent]
+    
+    if not old_messages:
+        return recent_messages
+    
+    # 오래된 메시지들을 요약
+    try:
+        summary_content = "\n".join([
+            f"{msg['role']}: {msg['content']}" 
+            for msg in old_messages
+        ])
+        
+        summary_response = client.models.generate_content(
+            model="gemini-2.5-flash",  # 요약은 빠른 모델 사용
+            contents=[f"다음 프로젝트 대화를 핵심 내용을 중심으로 요약해주세요:\n\n{summary_content}"],
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=1024,  # 프로젝트는 더 긴 요약 허용
+                thinking_config=types.ThinkingConfig(thinking_budget=0)  # 요약은 사고 없이
+            )
+        )
+        
+        # 요약된 메시지로 교체
+        compressed_messages = [
+            {"role": "system", "content": f"이전 프로젝트 대화 요약: {summary_response.text}"}
+        ] + recent_messages
+        
+        print(f"Project context compressed: {len(messages)} -> {len(compressed_messages)} messages")
+        return compressed_messages
+        
+    except Exception as e:
+        print(f"Project context compression error: {e}")
+        return messages[-keep_recent:]  # 실패시 최근 메시지만 유지
+
+class ProjectStreamingBuffer:
+    """프로젝트 스트리밍 응답 버퍼링"""
+    def __init__(self, buffer_size: int = PROJECT_STREAMING_BUFFER_SIZE):
+        self.buffer = []
+        self.buffer_size = buffer_size
+        self.current_size = 0
+        self.last_flush = time.time()
+    
+    def add_chunk(self, chunk: str) -> bool:
+        """청크 추가, 플러시 필요시 True 반환"""
+        self.buffer.append(chunk)
+        self.current_size += len(chunk.encode('utf-8'))
+        
+        # 버퍼가 가득 찼거나 일정 시간이 지난 경우 플러시
+        now = time.time()
+        return (self.current_size >= self.buffer_size or 
+                now - self.last_flush >= PROJECT_STREAMING_FLUSH_INTERVAL)
+    
+    def flush(self) -> str:
+        """버퍼 내용 반환 및 초기화"""
+        if not self.buffer:
+            return ""
+        
+        content = "".join(self.buffer)
+        self.buffer.clear()
+        self.current_size = 0
+        self.last_flush = time.time()
+        return content
 
 async def generate_gemini_stream_response(
     request: Request,
@@ -497,24 +612,24 @@ async def generate_gemini_stream_response(
 
 위 자료를 참고하여 질문에 답변해주세요.
 """
-                            logger.debug(f"🔍 임베딩 검색 성공: {len(similar_embeddings)}개 청크 발견")
+                            print(f"🔍 임베딩 검색 성공: {len(similar_embeddings)}개 청크 발견")
                             for i, result in enumerate(similar_embeddings):
-                                logger.debug(f"  [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}, 내용: {result['content'][:50]}...")
+                                print(f"  [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}, 내용: {result['content'][:50]}...")
                         else:
                             # 더 자세한 디버깅 정보 출력
                             print("❌ 임베딩 검색 결과 없음")
                             # 전체 임베딩 개수 확인
                             all_embeddings = crud_embedding.get_by_project(db, project_id)
-                            logger.debug(f"   전체 임베딩 개수: {len(all_embeddings)}")
+                            print(f"   전체 임베딩 개수: {len(all_embeddings)}")
                             if all_embeddings:
-                                logger.debug(f"   파일 목록: {list(set(e.file_name for e in all_embeddings))}")
-                            logger.debug(f"   사용자 질문: '{user_query}'")
-                            logger.debug(f"   임계값: 0.4")
+                                print(f"   파일 목록: {list(set(e.file_name for e in all_embeddings))}")
+                            print(f"   사용자 질문: '{user_query}'")
+                            print(f"   임계값: 0.4")
                     else:
                         print("임베딩 생성 실패")
                         
                 except Exception as e:
-                    logger.debug(f"임베딩 검색 중 오류: {e}")
+                    print(f"임베딩 검색 중 오류: {e}")
                     
         # 임베딩 컨텍스트를 시스템 프롬프트에 추가
         if embedding_context:
@@ -570,7 +685,7 @@ async def generate_gemini_stream_response(
                     total_tokens += msg_token_count
                 else:
                     # 토큰 한계에 도달하면 중단
-                    logger.debug(f"Project context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
+                    print(f"Project context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
                     break
         
         # 최소한 하나의 메시지는 포함되어야 함
@@ -585,7 +700,7 @@ async def generate_gemini_stream_response(
                 detail="No valid message content found"
             )
         
-        logger.debug(f"Project context management: Using {len(valid_messages)} messages with {total_tokens} tokens")
+        print(f"Project context management: Using {len(valid_messages)} messages with {total_tokens} tokens")
 
         # 컨텍스트 캐싱 임시 비활성화 (API 제약사항으로 인한 오류 방지)
         cached_content_name = None
@@ -628,7 +743,7 @@ async def generate_gemini_stream_response(
             for file in project_files_list[:3]:
                 contents.append(file)
         except Exception as e:
-            logger.debug(f"Failed to load project files for context: {e}")
+            print(f"Failed to load project files for context: {e}")
         
         # 업로드된 파일들 처리
         if file_data_list and file_types and file_names:
@@ -841,10 +956,10 @@ async def generate_gemini_stream_response(
         
         # 스트리밍이 정상적으로 완료된 경우에만 DB에 저장
         if streaming_completed and accumulated_content:
-            logger.debug(f"=== PROJECT SAVING MESSAGE DEBUG ===")
-            logger.debug(f"streaming_completed: {streaming_completed}")
-            logger.debug(f"accumulated_content length: {len(accumulated_content)}")
-            logger.debug(f"citations count: {len(citations)}")
+            print(f"=== PROJECT SAVING MESSAGE DEBUG ===")
+            print(f"streaming_completed: {streaming_completed}")
+            print(f"accumulated_content length: {len(accumulated_content)}")
+            print(f"citations count: {len(citations)}")
             message_create = ChatMessageCreate(
                 content=accumulated_content,
                 role="assistant",
@@ -853,14 +968,14 @@ async def generate_gemini_stream_response(
                 citations=citations if citations else None
             )
             crud_project.create_chat_message(db, project_id=project_id, chat_id=room_id, obj_in=message_create)
-            logger.debug(f"Project message saved successfully")
-            logger.debug(f"=== END PROJECT SAVING DEBUG ===")
+            print(f"Project message saved successfully")
+            print(f"=== END PROJECT SAVING DEBUG ===")
         else:
-            logger.debug(f"=== PROJECT MESSAGE NOT SAVED ===")
-            logger.debug(f"streaming_completed: {streaming_completed}")
-            logger.debug(f"accumulated_content: {bool(accumulated_content)}")
-            logger.debug(f"Reason: {'Streaming was interrupted' if not streaming_completed else 'No content'}")
-            logger.debug(f"=== END PROJECT NOT SAVED DEBUG ===")
+            print(f"=== PROJECT MESSAGE NOT SAVED ===")
+            print(f"streaming_completed: {streaming_completed}")
+            print(f"accumulated_content: {bool(accumulated_content)}")
+            print(f"Reason: {'Streaming was interrupted' if not streaming_completed else 'No content'}")
+            print(f"=== END PROJECT NOT SAVED DEBUG ===")
 
     except Exception as e:
         error_message = f"Project Stream Generation Error: {str(e)}"
@@ -1706,7 +1821,7 @@ async def get_or_create_project_context_cache(
             if cache.display_name == cache_name and cache.model == model:
                 # 캐시가 만료되지 않았는지 확인
                 if hasattr(cache, 'expire_time') and cache.expire_time and cache.expire_time > datetime.now(timezone.utc):
-                    logger.debug(f"Using existing project cache: {cache_name}")
+                    print(f"Using existing project cache: {cache_name}")
                     return cache.name
         
         # 프로젝트별 시스템 프롬프트 구성
@@ -1717,7 +1832,7 @@ async def get_or_create_project_context_cache(
             system_instruction += "\n\n" + RECORD_PROMPT
         
         # 새 캐시 생성 (빈 contents 문제 해결)
-        logger.debug(f"Creating new project cache: {cache_name}")
+        print(f"Creating new project cache: {cache_name}")
         cache = client.caches.create(
             model=model,
             config=types.CreateCachedContentConfig(
@@ -1729,7 +1844,7 @@ async def get_or_create_project_context_cache(
         )
         return cache.name
     except Exception as e:
-        logger.debug(f"Project cache creation error: {e}")
+        print(f"Project cache creation error: {e}")
         return None 
 
 # 프로젝트별 파일 업로드 및 관리 API
@@ -1776,7 +1891,7 @@ async def upload_project_file(
                 
                 # Gemini File API 제한 확인 및 처리
                 if len(file_content) > GEMINI_INLINE_DATA_LIMIT:
-                    logger.debug(f"Warning: File {file.filename} ({len(file_content)} bytes) exceeds Gemini inline data limit. Using File API instead.")
+                    print(f"Warning: File {file.filename} ({len(file_content)} bytes) exceeds Gemini inline data limit. Using File API instead.")
                     # 큰 파일은 File API를 통해 처리 (이미 현재 구현)
                 
                 # File API를 사용하여 업로드
@@ -1797,12 +1912,12 @@ async def upload_project_file(
                     try:
                         uploaded_file = client.files.get(name=uploaded_file.name)
                     except Exception as e:
-                        logger.debug(f"Error checking file status: {e}")
+                        print(f"Error checking file status: {e}")
                         break
                 
                 # 처리 상태 확인
                 if uploaded_file.state.name != 'ACTIVE':
-                    logger.debug(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
+                    print(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
                 
                 # file.name에서 'files/' 제거 (clean_file_id 정의)
                 clean_file_id = uploaded_file.name.replace("files/", "") if uploaded_file.name.startswith("files/") else uploaded_file.name
@@ -1843,7 +1958,7 @@ async def upload_project_file(
                             
                             for attempt_idx, attempt in enumerate(extract_attempts):
                                 try:
-                                    logger.debug(f"PDF 텍스트 추출 시도 {attempt_idx + 1}/{len(extract_attempts)}: {file.filename}")
+                                    print(f"PDF 텍스트 추출 시도 {attempt_idx + 1}/{len(extract_attempts)}: {file.filename}")
                                     
                                     extract_response = client.models.generate_content(
                                         model="gemini-2.5-flash",
@@ -1860,13 +1975,13 @@ async def upload_project_file(
                                     if extract_response and hasattr(extract_response, 'text') and extract_response.text:
                                         extracted_text = extract_response.text[:12000]  # 최대 12000자로 증가
                                         if len(extracted_text.strip()) > 100:  # 최소 100자 이상
-                                            logger.debug(f"PDF 텍스트 추출 성공 (시도 {attempt_idx + 1}): {len(extracted_text)}자")
+                                            print(f"PDF 텍스트 추출 성공 (시도 {attempt_idx + 1}): {len(extracted_text)}자")
                                             break
                                     else:
-                                        logger.debug(f"PDF 텍스트 추출 실패 (시도 {attempt_idx + 1}): 응답이 비어있음")
+                                        print(f"PDF 텍스트 추출 실패 (시도 {attempt_idx + 1}): 응답이 비어있음")
                                         
                                 except Exception as e:
-                                    logger.debug(f"PDF 텍스트 추출 시도 {attempt_idx + 1} 실패: {e}")
+                                    print(f"PDF 텍스트 추출 시도 {attempt_idx + 1} 실패: {e}")
                                     continue
                             
                             # 모든 시도 실패 시 폴백
@@ -1892,7 +2007,7 @@ async def upload_project_file(
 - 이미지로 스크린샷 후 이미지 파일로 업로드
 - 파일을 다시 PDF로 내보내기 시도
                                 """.strip()
-                                logger.debug(f"PDF 텍스트 추출 완전 실패 - 기본 정보 생성: {file.filename}")
+                                print(f"PDF 텍스트 추출 완전 실패 - 기본 정보 생성: {file.filename}")
                                 
                         # 일반 텍스트 파일 처리
                         elif file.content_type in ["text/plain"] or file.content_type.startswith("text/"):
@@ -1916,7 +2031,7 @@ async def upload_project_file(
                                     
                             except Exception as e:
                                 extracted_text = f"텍스트 파일 추출 실패: {str(e)}"
-                                logger.debug(f"텍스트 파일 추출 실패: {file.filename} - {e}")
+                                print(f"텍스트 파일 추출 실패: {file.filename} - {e}")
                                 
                         # 이미지 파일 처리 (강화된 OCR)
                         elif file.content_type.startswith("image/"):
@@ -1941,7 +2056,7 @@ async def upload_project_file(
                             
                             for attempt_idx, attempt in enumerate(ocr_attempts):
                                 try:
-                                    logger.debug(f"이미지 OCR 시도 {attempt_idx + 1}/{len(ocr_attempts)}: {file.filename}")
+                                    print(f"이미지 OCR 시도 {attempt_idx + 1}/{len(ocr_attempts)}: {file.filename}")
                                     
                                     extract_response = client.models.generate_content(
                                         model="gemini-2.5-flash",
@@ -1958,13 +2073,13 @@ async def upload_project_file(
                                     if extract_response and hasattr(extract_response, 'text') and extract_response.text:
                                         extracted_text = extract_response.text[:10000]
                                         if len(extracted_text.strip()) > 50:  # 최소 50자 이상
-                                            logger.debug(f"이미지 OCR 성공 (시도 {attempt_idx + 1}): {len(extracted_text)}자")
+                                            print(f"이미지 OCR 성공 (시도 {attempt_idx + 1}): {len(extracted_text)}자")
                                             break
                                     else:
-                                        logger.debug(f"이미지 OCR 실패 (시도 {attempt_idx + 1}): 응답이 비어있음")
+                                        print(f"이미지 OCR 실패 (시도 {attempt_idx + 1}): 응답이 비어있음")
                                         
                                 except Exception as e:
-                                    logger.debug(f"이미지 OCR 시도 {attempt_idx + 1} 실패: {e}")
+                                    print(f"이미지 OCR 시도 {attempt_idx + 1} 실패: {e}")
                                     continue
                             
                             # 모든 시도 실패 시 폴백
@@ -1990,7 +2105,7 @@ async def upload_project_file(
 - 텍스트 부분만 크롭해서 업로드
 - 텍스트를 직접 타이핑해서 텍스트 파일로 업로드
                                 """.strip()
-                                logger.debug(f"이미지 OCR 완전 실패 - 기본 정보 생성: {file.filename}")
+                                print(f"이미지 OCR 완전 실패 - 기본 정보 생성: {file.filename}")
                         
                         # 워드 문서 처리
                         elif file.content_type in [
@@ -2017,7 +2132,7 @@ async def upload_project_file(
                                     
                             except Exception as e:
                                 extracted_text = f"워드 문서 추출 실패: {str(e)}"
-                                logger.debug(f"워드 문서 추출 실패: {file.filename} - {e}")
+                                print(f"워드 문서 추출 실패: {file.filename} - {e}")
                         
                         # 추출된 텍스트가 유효한 경우 임베딩 생성
                         if (extracted_text and len(extracted_text.strip()) > 30 and 
@@ -2056,7 +2171,7 @@ async def upload_project_file(
                                 else:
                                     final_chunks.append(chunk)
                             
-                            logger.debug(f"텍스트 청크 생성 완료: {len(final_chunks)}개 청크")
+                            print(f"텍스트 청크 생성 완료: {len(final_chunks)}개 청크")
                             
                             # 임베딩 생성 (병렬 처리 고려)
                             for i, chunk in enumerate(final_chunks):
@@ -2101,20 +2216,20 @@ async def upload_project_file(
                                         })
                                         
                                 except Exception as e:
-                                    logger.debug(f"임베딩 생성 실패 (청크 {i}): {e}")
+                                    print(f"임베딩 생성 실패 (청크 {i}): {e}")
                                     continue
                             
-                            logger.debug(f"임베딩 생성 완료: {len(embedding_data_list)}개 임베딩")
+                            print(f"임베딩 생성 완료: {len(embedding_data_list)}개 임베딩")
                         
                         else:
-                            logger.debug(f"텍스트 추출 결과가 임베딩 생성에 부적합: {file.filename}")
+                            print(f"텍스트 추출 결과가 임베딩 생성에 부적합: {file.filename}")
                     
                     else:
-                        logger.debug(f"파일이 ACTIVE 상태가 아님: {file.filename} (상태: {uploaded_file.state.name})")
+                        print(f"파일이 ACTIVE 상태가 아님: {file.filename} (상태: {uploaded_file.state.name})")
                         extracted_text = f"파일 처리 대기 중: {uploaded_file.state.name}"
                         
                 except Exception as e:
-                    logger.debug(f"파일 처리 중 오류 발생: {file.filename} - {e}")
+                    print(f"파일 처리 중 오류 발생: {file.filename} - {e}")
                     extracted_text = f"파일 처리 실패: {str(e)}"
                 
                 # 데이터베이스에 임베딩 저장
@@ -2122,11 +2237,11 @@ async def upload_project_file(
                     try:
                         embedding_creates = [ProjectEmbeddingCreate(**data) for data in embedding_data_list]
                         saved_embeddings = crud_embedding.batch_create_embeddings(db, embedding_creates)
-                        logger.debug(f"데이터베이스에 저장된 임베딩: {len(saved_embeddings)}개 (파일: {file.filename})")
+                        print(f"데이터베이스에 저장된 임베딩: {len(saved_embeddings)}개 (파일: {file.filename})")
                     except Exception as e:
-                        logger.debug(f"임베딩 데이터베이스 저장 실패: {e}")
+                        print(f"임베딩 데이터베이스 저장 실패: {e}")
                 else:
-                    logger.debug(f"저장할 임베딩이 없음: {file.filename}")
+                    print(f"저장할 임베딩이 없음: {file.filename}")
                 
                 # 파일 정보 저장 (임베딩 정보 포함)
                 file_info = {
@@ -2154,7 +2269,7 @@ async def upload_project_file(
             except HTTPException:
                 raise
             except Exception as e:
-                logger.debug(f"Error uploading file {file.filename}: {e}")
+                print(f"Error uploading file {file.filename}: {e}")
                 raise HTTPException(
                     status_code=500,
                     detail=f"Failed to upload file {file.filename}: {str(e)}"
@@ -2238,15 +2353,15 @@ async def delete_project_file(
         # 관련 임베딩 먼저 삭제
         try:
             deleted_embeddings = crud_embedding.delete_by_file(db, project_id, file_id)
-            logger.debug(f"Deleted {deleted_embeddings} embeddings for file {file_id}")
+            print(f"Deleted {deleted_embeddings} embeddings for file {file_id}")
         except Exception as e:
-            logger.debug(f"Failed to delete embeddings for file {file_id}: {e}")
+            print(f"Failed to delete embeddings for file {file_id}: {e}")
         
         # 파일 삭제
         try:
             client.files.delete(name=full_file_id)
         except Exception as e:
-            logger.debug(f"Failed to delete file {full_file_id}: {e}")
+            print(f"Failed to delete file {full_file_id}: {e}")
             # 파일이 이미 삭제되었거나 존재하지 않는 경우도 성공으로 처리
             pass
         
@@ -2294,9 +2409,9 @@ async def search_project_knowledge(
         
         # 데이터베이스에서 유사도 기반 검색 수행 (임계값 낮춤)
         try:
-            logger.debug(f"🔍 지식베이스 검색 시작: '{query}'")
-            logger.debug(f"   프로젝트 ID: {project_id}")
-            logger.debug(f"   요청 결과 수: {top_k}")
+            print(f"🔍 지식베이스 검색 시작: '{query}'")
+            print(f"   프로젝트 ID: {project_id}")
+            print(f"   요청 결과 수: {top_k}")
             
             similar_embeddings = crud_embedding.search_similar(
                 db=db,
@@ -2306,7 +2421,7 @@ async def search_project_knowledge(
                 threshold=0.4  # 임계값을 0.75에서 0.4로 낮춤
             )
             
-            logger.debug(f"   검색된 임베딩 수: {len(similar_embeddings)}")
+            print(f"   검색된 임베딩 수: {len(similar_embeddings)}")
             
             # 검색 결과를 적절한 형태로 변환
             top_chunks = []
@@ -2317,15 +2432,15 @@ async def search_project_knowledge(
                     "source_file": result["file_name"],
                     "chunk_index": result["chunk_index"]
                 })
-                logger.debug(f"   [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}")
+                print(f"   [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}")
                 
         except Exception as e:
-            logger.debug(f"❌ 지식베이스 검색 오류: {e}")
+            print(f"❌ 지식베이스 검색 오류: {e}")
             # 디버깅을 위한 추가 정보
             all_embeddings = crud_embedding.get_by_project(db, project_id)
-            logger.debug(f"   전체 임베딩 개수: {len(all_embeddings)}")
+            print(f"   전체 임베딩 개수: {len(all_embeddings)}")
             if all_embeddings:
-                logger.debug(f"   파일 목록: {list(set(e.file_name for e in all_embeddings))}")
+                print(f"   파일 목록: {list(set(e.file_name for e in all_embeddings))}")
             # 폴백: 빈 결과 반환
             top_chunks = []
         
@@ -2518,7 +2633,7 @@ async def generate_gemini_stream_response_with_files(
                 사용자의 질문과 관련이 있다면 이 파일들의 내용을 참고하여 답변해주세요.
                 """
         except Exception as e:
-            logger.debug(f"Failed to load project files: {e}")
+            print(f"Failed to load project files: {e}")
 
         # 메시지 유효성 검사 및 처리
         valid_messages = []

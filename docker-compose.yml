@@ -31,4 +31,5 @@ services:
       - DEBUG=false
       - PYTHONOPTIMIZE=1
       - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=0
     command: ./start.sh

@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey, Enum as SQLEnum, JSON
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.attributes import flag_modified
 from app.db.base_class import Base
 from datetime import datetime, timedelta
 from app.core.utils import get_kr_time
@@ -99,7 +100,6 @@ class Subscription(Base):
     def increment_usage(self, model_name: str) -> bool:
         """모델 사용량을 증가시킵니다."""
         group = self.get_model_group(model_name)
-
         
         if not group:
             return False
@@ -120,7 +120,14 @@ class Subscription(Base):
         if current_usage >= self.group_limits[group]:
             return False
         
-        self.group_usage[group] = current_usage + 1
+        # JSON 필드 변경 강제 감지를 위해 새 딕셔너리 생성
+        new_usage = dict(self.group_usage)
+        new_usage[group] = current_usage + 1
+        self.group_usage = new_usage
+        
+        # SQLAlchemy에 JSON 필드 변경 알림
+        flag_modified(self, 'group_usage')
+        
         return True
 
     def get_remaining_usage(self, model_name: str) -> int:

@@ -67,7 +67,7 @@ class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
             user_type = await self._get_user_type(request)
             api_type = self._get_api_type(request.url.path)
             
-            rate_limit_logger.info("rate_limit_check_started", {
+            rate_limit_print("rate_limit_check_started", {
                 "client_id": client_id,
                 "user_type": user_type,
                 "api_type": api_type,
@@ -100,7 +100,7 @@ class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
                 response.headers["X-RateLimit-Reset"] = str(int(time.time() + rate_info.get("window", 60)))
             
             # 성공 로깅
-            rate_limit_logger.info("rate_limit_check_passed", {
+            rate_limit_print("rate_limit_check_passed", {
                 "client_id": client_id,
                 "api_type": api_type,
                 "duration": time.time() - start_time,

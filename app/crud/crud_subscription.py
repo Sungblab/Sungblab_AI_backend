@@ -120,17 +120,22 @@ def update_model_usage(db: Session, user_id: str, model_name: str) -> Optional[S
             
         # 사용량 증가 시도
         if subscription.increment_usage(model_name):
-            # 변경사항 즉시 저장
-            db.execute(
-                update(Subscription).
-                where(Subscription.user_id == user_id).
-                values(group_usage=subscription.group_usage)
-            )
-            db.commit()
-            db.refresh(subscription)
-            return subscription
+            # 변경사항을 명시적으로 플러시하여 데이터베이스에 반영
+            db.flush()
             
-        return None
+            # 다시 한번 확인하여 실제로 변경되었는지 검증
+            db.refresh(subscription)
+            
+            # 커밋
+            db.commit()
+            
+            return subscription
+        else:
+            # 사용량 증가 실패 시 롤백
+            db.rollback()
+            return None
+            
     except Exception as e:
         db.rollback()
+        print(f"사용량 업데이트 중 오류 발생: {str(e)}")
         raise e 

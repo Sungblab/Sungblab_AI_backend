@@ -290,7 +290,7 @@ class DatabaseQueryOptimizer:
             pattern = f"db_query:room_messages:*{room_id}*"
             DatabaseCache.cache_manager.clear_pattern(pattern)
             
-            ai_logger.info("cache_invalidated", {
+            ai_print("cache_invalidated", {
                 "type": "room_messages",
                 "room_id": room_id
             })
@@ -372,7 +372,7 @@ class CacheIntegrationManager:
                         estimated_tokens = {"input_tokens": len(prompt) // 4, "output_tokens": 0}
                         TokenCache.cache_manager.set(cache_key, estimated_tokens, TokenCache.DEFAULT_TTL)
             
-            ai_logger.info("cache_warmup_completed", {
+            ai_print("cache_warmup_completed", {
                 "system_prompts": len(common_system_prompts),
                 "models": len(common_models)
             })
@@ -385,7 +385,7 @@ class CacheIntegrationManager:
         """만료된 캐시 정리"""
         try:
             # Redis 자체적으로 TTL 관리하지만, 필요시 수동 정리 가능
-            ai_logger.info("cache_cleanup_completed", {})
+            ai_print("cache_cleanup_completed", {})
         except Exception as e:
             ai_logger.warning("cache_cleanup_failed", {"error": str(e)})
 

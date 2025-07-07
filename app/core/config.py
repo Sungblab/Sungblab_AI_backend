@@ -1,9 +1,6 @@
 from typing import Optional, List, Union
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, validator
-import logging
-
-logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # API 설정
@@ -25,13 +22,6 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_FILE: Optional[str] = None
-    
-    @property
-    def effective_log_level(self) -> str:
-        """환경에 따른 실제 로깅 레벨 반환"""
-        if self.ENVIRONMENT == "production":
-            return "WARNING"  # 프로덕션에서는 WARNING 이상만 로그
-        return self.LOG_LEVEL
     
     # JWT 설정
     SECRET_KEY: str
@@ -70,9 +60,7 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # 프로덕션 환경이 아닐 때만 환경 정보 출력
-        if self.ENVIRONMENT != "production":
-            logger.debug(f"Environment: {self.ENVIRONMENT}")
+        print(f"Environment: {self.ENVIRONMENT}")
 
     @validator("SQLALCHEMY_DATABASE_URL", pre=True)
     def assemble_db_url(cls, v: Optional[str], values: dict) -> str:

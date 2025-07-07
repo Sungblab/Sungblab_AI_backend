@@ -51,9 +51,9 @@ def init_db() -> None:
                 )
                 admin = crud_user.create_user(db, obj_in=admin_in)
                 db.commit()
-                logger.info("Admin user created")
+                print("Admin user created")
             else:
-                logger.info("Admin user already exists")
+                print("Admin user already exists")
             
             # 모든 사용자에 대해 기본 구독 정보 생성
             users = db.query(User).all()
@@ -77,7 +77,7 @@ def init_db() -> None:
                     db.add(subscription)
             
             db.commit()
-            logger.info("Database initialization completed successfully")
+            print("Database initialization completed successfully")
             break
             
         except OperationalError as e:

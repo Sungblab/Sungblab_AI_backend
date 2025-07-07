@@ -111,7 +111,7 @@ class StructuredLogger:
     
     def info(self, event: str, data: Optional[Dict[str, Any]] = None):
         """정보 로그"""
-        self.logger.info(json.dumps({
+        self.print(json.dumps({
             "timestamp": datetime.utcnow().isoformat(),
             "level": "INFO",
             "event": event,

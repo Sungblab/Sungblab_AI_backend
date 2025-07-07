@@ -25,7 +25,7 @@ logging.getLogger("alembic").setLevel(logging.WARNING)
 # 구조화된 로깅 초기화
 structured_logger = StructuredLogger("sungblab_api")
 logger = logging.getLogger("sungblab_api")
-logger.setLevel(settings.effective_log_level)
+logger.setLevel(settings.LOG_LEVEL)
 
 # OpenAPI 메타데이터 설정
 description = """
@@ -136,10 +136,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    structured_logger.info("startup_event", {"message": "Initializing database..."})
+    print("startup_event", {"message": "Initializing database..."})
     try:
         init_db()
-        structured_logger.info("startup_event", {"message": "Database initialization complete"})
+        print("startup_event", {"message": "Database initialization complete"})
     except Exception as e:
         structured_logger.log_error(
             error=e,
@@ -158,7 +158,7 @@ def read_root():
     
     API 서버가 정상적으로 실행 중인지 확인하는 엔드포인트입니다.
     """
-    logger.info("Root endpoint accessed")
+    print("Root endpoint accessed")
     return {
         "message": "Welcome to SungbLab AI API",
         "version": settings.VERSION,

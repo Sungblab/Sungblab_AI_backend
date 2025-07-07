@@ -106,7 +106,7 @@ class EmbeddingBatchProcessor:
         with self.processing_lock:
             self.processing_queue.append(task)
             
-        batch_logger.info("embedding_task_added", {
+        batch_print("embedding_task_added", {
             "task_id": task.id,
             "text_count": len(texts),
             "model": model,
@@ -124,7 +124,7 @@ class EmbeddingBatchProcessor:
         """임베딩 배치 처리"""
         
         start_time = time.time()
-        batch_logger.info("embedding_batch_started", {
+        batch_print("embedding_batch_started", {
             "batch_size": len(batch_tasks),
             "task_ids": [task.id for task in batch_tasks]
         })
@@ -161,7 +161,7 @@ class EmbeddingBatchProcessor:
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = datetime.utcnow()
             
-            batch_logger.info("embedding_batch_completed", {
+            batch_print("embedding_batch_completed", {
                 "batch_size": len(batch_tasks),
                 "total_embeddings": len(all_texts),
                 "duration": time.time() - start_time,
@@ -207,7 +207,7 @@ class FileBatchProcessor:
         if len(file_content.encode()) > self.max_file_size:
             raise ValueError(f"File too large: {len(file_content.encode())} bytes")
         
-        batch_logger.info("large_file_processing_started", {
+        batch_print("large_file_processing_started", {
             "file_name": file_name,
             "file_size": len(file_content),
             "project_id": project_id,
@@ -232,7 +232,7 @@ class FileBatchProcessor:
                     "file_id": file_id
                 })
             
-            batch_logger.info("large_file_processing_completed", {
+            batch_print("large_file_processing_completed", {
                 "file_name": file_name,
                 "total_chunks": len(chunks),
                 "duration": time.time() - start_time,
@@ -305,7 +305,7 @@ class AsyncTaskQueue:
     async def start(self):
         """큐 시작"""
         self.is_running = True
-        batch_logger.info("task_queue_started", {
+        batch_print("task_queue_started", {
             "max_workers": self.max_workers,
             "max_queue_size": self.max_queue_size
         })
@@ -321,7 +321,7 @@ class AsyncTaskQueue:
     async def stop(self):
         """큐 중지"""
         self.is_running = False
-        batch_logger.info("task_queue_stopped", {})
+        batch_print("task_queue_stopped", {})
     
     async def add_task(self, task: BatchTask) -> bool:
         """작업 추가"""
@@ -334,7 +334,7 @@ class AsyncTaskQueue:
                 return False
             
             heapq.heappush(self.task_queue, task)
-            batch_logger.info("task_added_to_queue", {
+            batch_print("task_added_to_queue", {
                 "task_id": task.id,
                 "task_type": task.task_type,
                 "priority": task.priority.name,
@@ -364,7 +364,7 @@ class AsyncTaskQueue:
     
     async def _worker(self, worker_name: str):
         """워커 함수"""
-        batch_logger.info("worker_started", {"worker_name": worker_name})
+        batch_print("worker_started", {"worker_name": worker_name})
         
         while self.is_running:
             try:
@@ -385,7 +385,7 @@ class AsyncTaskQueue:
                 })
                 await asyncio.sleep(1)  # 에러 발생시 잠시 대기
         
-        batch_logger.info("worker_stopped", {"worker_name": worker_name})
+        batch_print("worker_stopped", {"worker_name": worker_name})
     
     async def _get_next_task(self) -> Optional[BatchTask]:
         """큐에서 다음 작업 가져오기"""
@@ -400,7 +400,7 @@ class AsyncTaskQueue:
         task.started_at = datetime.utcnow()
         self.active_tasks[task.id] = task
         
-        batch_logger.info("task_processing_started", {
+        batch_print("task_processing_started", {
             "task_id": task.id,
             "task_type": task.task_type,
             "worker_name": worker_name
@@ -420,7 +420,7 @@ class AsyncTaskQueue:
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.utcnow()
             
-            batch_logger.info("task_processing_completed", {
+            batch_print("task_processing_completed", {
                 "task_id": task.id,
                 "task_type": task.task_type,
                 "duration": time.time() - start_time,
@@ -493,14 +493,14 @@ class BatchProcessingManager:
         if not self.is_initialized:
             await self.task_queue.start()
             self.is_initialized = True
-            batch_logger.info("batch_manager_initialized", {})
+            batch_print("batch_manager_initialized", {})
     
     async def shutdown(self):
         """매니저 종료"""
         if self.is_initialized:
             await self.task_queue.stop()
             self.is_initialized = False
-            batch_logger.info("batch_manager_shutdown", {})
+            batch_print("batch_manager_shutdown", {})
     
     async def submit_embedding_batch(
         self,

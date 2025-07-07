@@ -1,17 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
 
 from app.core.security import get_current_user, get_password_hash, verify_password
 from app.db.session import get_db
 from app.schemas.auth import User
 from app.api import deps
-from app.models.subscription import Subscription
+from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.user import User as UserModel
 from app.crud import crud_user
+from app.core.utils import get_kr_time
 from pydantic import BaseModel
-import logging
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -35,11 +34,25 @@ def get_my_subscription(
         Subscription.user_id == str(current_user.id)
     ).first()
     
+    # 구독 정보가 없으면 기본 구독 정보 생성
     if not subscription:
-        raise HTTPException(
-            status_code=404,
-            detail="구독 정보를 찾을 수 없습니다."
+        subscription = Subscription(
+            user_id=str(current_user.id),
+            plan=SubscriptionPlan.FREE,
+            status="active",
+            start_date=get_kr_time(),
+            end_date=get_kr_time() + timedelta(days=30),
+            auto_renew=True,
+            renewal_date=get_kr_time() + timedelta(days=30),
+            group_usage={
+                "basic_chat": 0,
+                "normal_analysis": 0,
+                "advanced_analysis": 0
+            }
         )
+        db.add(subscription)
+        db.commit()
+        db.refresh(subscription)
     
     return subscription.to_dict() 
 
@@ -72,7 +85,7 @@ def delete_current_user(
         return {"message": "계정이 성공적으로 삭제되었습니다."}
     except Exception as e:
         db.rollback()
-        logger.debug(f"계정 삭제 중 오류 발생: {str(e)}")
+        print(f"계정 삭제 중 오류 발생: {str(e)}")
         # 더 자세한 에러 정보 출력
         import traceback
         traceback.print_exc()
