@@ -1,6 +1,9 @@
 from typing import Optional, List, Union
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, validator
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # API 설정
