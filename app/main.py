@@ -124,7 +124,6 @@ origins = [
     "https://sungblab.com",
     "https://www.sungblab.com",
     "https://sungblab-ai-frontend.vercel.app",
-    "*"  # 임시로 모든 도메인 허용
 ]
 
 app.add_middleware(
