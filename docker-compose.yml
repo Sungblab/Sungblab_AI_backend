@@ -29,7 +29,7 @@ services:
       - CREATE_INITIAL_ADMIN=${CREATE_INITIAL_ADMIN}
       - ENVIRONMENT=production
       - DEBUG=false
-      - PYTHONOPTIMIZE=1
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=0
+      # - PYTHONOPTIMIZE=1
+      # - PYTHONPATH=/app
+      # - PYTHONUNBUFFERED=0
     command: ./start.sh
