@@ -119,16 +119,16 @@ setup_error_handlers(app)
 app.add_middleware(ErrorMonitoringMiddleware)
 
 # CORS 설정
-# origins = [
-#     "http://localhost:3000",
-#     "https://sungblab.com",
-#     "https://www.sungblab.com",
-#     "https://sungblab-ai-frontend.vercel.app",
-# ]
+origins = [
+    "http://localhost:3000",
+    "https://sungblab.com",
+    "https://www.sungblab.com",
+    "https://sungblab-ai-frontend.vercel.app"
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

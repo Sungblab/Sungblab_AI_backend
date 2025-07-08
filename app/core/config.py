@@ -71,18 +71,11 @@ class Settings(BaseSettings):
     @property
     def BACKEND_CORS_ORIGINS(self) -> List[str]:
         if self.BACKEND_CORS_ORIGINS_STR is None or self.BACKEND_CORS_ORIGINS_STR == "":
-            # 기본 허용 origin 목록
-            default_origins = [
+            return [
                 "https://sungblab.com",
                 "https://www.sungblab.com",
-                "http://localhost:3000",
-                "http://localhost:5173",  # Vite 개발 서버
-                "https://sungblab-ai-frontend.vercel.app",  # Vercel 배포
+                "http://localhost:3000"
             ]
-            # 개발 환경에서는 모든 origin 허용
-            if self.ENVIRONMENT == "development":
-                return ["*"]
-            return default_origins
         if self.BACKEND_CORS_ORIGINS_STR == "*":
             return ["*"]
         return [i.strip() for i in self.BACKEND_CORS_ORIGINS_STR.split(",")]
