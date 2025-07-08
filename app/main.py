@@ -10,6 +10,8 @@ import logging
 import pytz
 from datetime import datetime
 import os
+import time
+from fastapi import Response
 
 # 한국 시간대 설정
 os.environ['TZ'] = 'Asia/Seoul'
@@ -119,20 +121,39 @@ setup_error_handlers(app)
 app.add_middleware(ErrorMonitoringMiddleware)
 
 # CORS 설정
-# origins = [
-#     "http://localhost:3000",
-#     "https://sungblab.com",
-#     "https://www.sungblab.com",
-#     "https://sungblab-ai-frontend.vercel.app",
-# ]
-
+# 클라우드타입 및 프로덕션 환경을 위한 강화된 CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,  # 24시간 캐시
 )
+
+# 추가 CORS 헤더를 위한 미들웨어
+@app.middleware("http")
+async def add_process_time_header(request, call_next):
+    # OPTIONS 요청에 대한 빠른 응답
+    if request.method == "OPTIONS":
+        response = Response()
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        return response
+    
+    # 일반 요청 처리
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    # 추가 CORS 헤더 보장
+    if "Access-Control-Allow-Origin" not in response.headers:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
 @app.on_event("startup")
 async def startup_event():

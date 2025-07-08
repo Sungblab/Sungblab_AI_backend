@@ -23,6 +23,8 @@ import asyncio
 import io
 import time
 import hashlib
+from typing import Callable
+from fastapi import FastAPI
 
 # 새로운 Google Genai 라이브러리 import
 from google import genai
@@ -331,6 +333,29 @@ class ChatMessageCreate(BaseModel):
     room_id: Optional[str] = None
 
 router = APIRouter()
+
+# CORS 미들웨어 함수
+@router.middleware("http")
+async def add_cors_headers(request: Request, call_next: Callable):
+    """프로젝트 라우터 전용 CORS 미들웨어"""
+    # Preflight 요청 처리
+    if request.method == "OPTIONS":
+        response = Response()
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Cache-Control"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        return response
+    
+    # 일반 요청 처리
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With, Cache-Control"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Type"
+    return response
 
 async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
     try:
@@ -1142,17 +1167,10 @@ def delete_project_chat(
 # 프로젝트 목록 조회
 @router.get("/", response_model=List[Dict[str, Any]])
 def get_projects(
-    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """사용자의 프로젝트 목록을 조회합니다."""
-    # CORS 헤더 명시적 추가
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    
     projects = crud_project.get_multi_by_user(db=db, user_id=current_user.id)
     return projects
 
@@ -1160,17 +1178,10 @@ def get_projects(
 @router.get("/{project_id}")
 def get_project(
     project_id: str,
-    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """특정 프로젝트를 조회합니다."""
-    # CORS 헤더 명시적 추가
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    
     project = crud_project.get(db=db, id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
