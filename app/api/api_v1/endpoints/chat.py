@@ -1407,6 +1407,11 @@ async def search_web(
                                     if hasattr(chunk, 'web') and chunk.web:
                                         print(f"Search Chunk {i} web: type={type(chunk.web)}, dir={dir(chunk.web)}")
                                         citation_url = chunk.web.uri
+                                        
+                                        # Mixed Content 문제 방지: HTTP URL을 HTTPS로 변환
+                                        if citation_url.startswith('http://'):
+                                            citation_url = citation_url.replace('http://', 'https://', 1)
+                                        
                                         # 중복 방지
                                         if citation_url not in citations_sent:
                                             citation = {

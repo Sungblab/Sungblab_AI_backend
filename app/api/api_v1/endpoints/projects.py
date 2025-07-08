@@ -1661,6 +1661,11 @@ async def search_project_web(
                                 for chunk_info in grounding.grounding_chunks:
                                     if hasattr(chunk_info, 'web') and chunk_info.web:
                                         citation_url = chunk_info.web.uri
+                                        
+                                        # Mixed Content 문제 방지: HTTP URL을 HTTPS로 변환
+                                        if citation_url.startswith('http://'):
+                                            citation_url = citation_url.replace('http://', 'https://', 1)
+                                        
                                         if citation_url not in citations_sent:
                                             citation = {
                                                 "url": citation_url,
