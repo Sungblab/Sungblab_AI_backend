@@ -106,7 +106,8 @@ app = FastAPI(
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
     openapi_tags=tags_metadata,
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
+    redirect_slashes=False  # trailing slash 자동 리디렉션 비활성화
 )
 
 # 에러 추적 초기화 (Sentry)
