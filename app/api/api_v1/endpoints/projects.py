@@ -1145,7 +1145,7 @@ def get_projects(
 ):
     """사용자의 프로젝트 목록을 조회합니다."""
     projects = crud_project.get_multi_by_user(db=db, user_id=current_user.id)
-    return projects
+    return [p.to_dict(include_chats=True) for p in projects]
 
 # 특정 프로젝트 조회
 @router.get("/{project_id}")
