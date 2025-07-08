@@ -4,6 +4,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.api import deps
+from app.db.session import get_db
+from app.core.security import get_current_user
 from app.crud import crud_project, crud_stats, crud_subscription
 from app.crud import crud_embedding
 from app.crud.crud_embedding import ProjectEmbeddingCreate
@@ -1140,8 +1142,8 @@ def delete_project_chat(
 # 프로젝트 목록 조회
 @router.get("/", response_model=List[Dict[str, Any]])
 def get_projects(
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """사용자의 프로젝트 목록을 조회합니다."""
     projects = crud_project.get_multi_by_user(db=db, user_id=current_user.id)
@@ -1151,8 +1153,8 @@ def get_projects(
 @router.get("/{project_id}")
 def get_project(
     project_id: str,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_user)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """특정 프로젝트를 조회합니다."""
     project = crud_project.get(db=db, id=project_id)
