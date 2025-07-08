@@ -332,20 +332,6 @@ class ChatMessageCreate(BaseModel):
 
 router = APIRouter()
 
-# CORS preflight 요청 처리
-@router.options("/")
-@router.options("/{project_id}")
-@router.options("/{project_id}/chats")
-@router.options("/{project_id}/chats/{chat_id}")
-def handle_cors_preflight(response: Response):
-    """CORS preflight 요청을 처리합니다."""
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Max-Age"] = "3600"
-    return {"status": "ok"}
-
 async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
     try:
         contents = await file.read()
