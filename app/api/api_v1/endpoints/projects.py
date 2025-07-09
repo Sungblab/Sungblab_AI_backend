@@ -929,7 +929,9 @@ async def generate_gemini_stream_response(
                 thinking_token_count = await count_gemini_tokens(accumulated_thinking, model, client)
                 thinking_tokens = thinking_token_count.get("input_tokens", 0)
 
-            # 토큰 사용량 저장
+            # 토큰 사용량 저장 (KST 시간으로 저장)
+            from pytz import timezone
+            kst = timezone('Asia/Seoul')
             crud_stats.create_token_usage(
                 db=db,
                 user_id=user_id,
@@ -937,7 +939,7 @@ async def generate_gemini_stream_response(
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens + thinking_tokens,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(kst),
                 chat_type=f"project_{project_type}" if project_type else None
             )
 
@@ -1734,14 +1736,16 @@ async def get_project_token_usage(
         if not project or project.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not enough permissions")
         
-        # 문자열을 datetime으로 변환
+        # KST 시간 문자열을 datetime으로 변환
         start_dt = None
         end_dt = None
         
         if start_date:
-            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
         if end_date:
-            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
         
         # 각 채팅방별 토큰 사용량 합계
         total_usage = crud_stats.get_token_usage(
@@ -1780,14 +1784,16 @@ async def get_project_chat_usage(
         if not project or project.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not enough permissions")
         
-        # 문자열을 datetime으로 변환
+        # KST 시간 문자열을 datetime으로 변환
         start_dt = None
         end_dt = None
         
         if start_date:
-            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
         if end_date:
-            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
         
         # 프로젝트별 채팅 통계 조회
         chat_stats = crud_stats.get_chat_statistics(
@@ -2771,7 +2777,9 @@ async def generate_gemini_stream_response_with_files(
                 thinking_token_count = await count_gemini_tokens(accumulated_reasoning, model, client)
                 thinking_tokens = thinking_token_count.get("input_tokens", 0)
 
-            # 토큰 사용량 저장
+            # 토큰 사용량 저장 (KST 시간으로 저장)
+            from pytz import timezone
+            kst = timezone('Asia/Seoul')
             crud_stats.create_token_usage(
                 db=db,
                 user_id=user_id,
@@ -2779,7 +2787,7 @@ async def generate_gemini_stream_response_with_files(
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens + thinking_tokens,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(kst),
                 chat_type=f"project_{project_type}" if project_type else None
             )
 

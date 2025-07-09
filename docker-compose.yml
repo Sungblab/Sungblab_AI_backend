@@ -27,9 +27,9 @@ services:
       - ADMIN_NAME=${ADMIN_NAME}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD}
       - CREATE_INITIAL_ADMIN=${CREATE_INITIAL_ADMIN}
-      - ENVIRONMENT=production
-      - DEBUG=false
-      - PYTHONOPTIMIZE=1
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - PYTHONOPTIMIZE=0
       - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=0
+      - PYTHONUNBUFFERED=1
     command: ./start.sh

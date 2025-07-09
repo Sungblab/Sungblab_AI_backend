@@ -30,3 +30,4 @@ redis
 celery
 prometheus-client
 sentry-sdk[fastapi]
+psutil

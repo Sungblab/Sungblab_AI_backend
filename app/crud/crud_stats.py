@@ -54,13 +54,14 @@ def get_token_usage(
     """토큰 사용량 통계를 조회합니다."""
     query = db.query(TokenUsage)
     
-    # 날짜 필터링 - start_date와 end_date가 모두 제공된 경우에만 적용
+    # 날짜 필터링을 선택적으로 적용
     if start_date is not None and end_date is not None:
         query = query.filter(TokenUsage.timestamp.between(start_date, end_date))
     elif start_date is not None:
         query = query.filter(TokenUsage.timestamp >= start_date)
     elif end_date is not None:
         query = query.filter(TokenUsage.timestamp <= end_date)
+    # 날짜 필터링이 없으면 모든 데이터 조회
     
     if user_id:
         query = query.filter(TokenUsage.user_id == user_id)
@@ -74,6 +75,13 @@ def get_token_usage_history(
     user_id: Optional[str] = None
 ) -> List[dict]:
     """토큰 사용 기록을 시간순으로 가져옵니다."""
+    
+    # 디버깅 로그 추가
+    print(f"[DEBUG] get_token_usage_history 호출됨:")
+    print(f"  - start: {start}")
+    print(f"  - end: {end}")
+    print(f"  - user_id: {user_id}")
+    
     query = db.query(
         TokenUsage.timestamp,
         TokenUsage.model,
@@ -87,13 +95,18 @@ def get_token_usage_history(
         User, TokenUsage.user_id == User.id
     )
     
-    # 날짜 필터링 - start와 end가 모두 제공된 경우에만 적용
+    # 날짜 필터링을 선택적으로 적용
     if start is not None and end is not None:
         query = query.filter(TokenUsage.timestamp.between(start, end))
+        print(f"[DEBUG] 날짜 필터링 적용: {start} ~ {end}")
     elif start is not None:
         query = query.filter(TokenUsage.timestamp >= start)
+        print(f"[DEBUG] 시작 날짜 필터링 적용: >= {start}")
     elif end is not None:
         query = query.filter(TokenUsage.timestamp <= end)
+        print(f"[DEBUG] 종료 날짜 필터링 적용: <= {end}")
+    else:
+        print(f"[DEBUG] 날짜 필터링 없음 - 전체 데이터 조회")
 
     if user_id:
         query = query.filter(TokenUsage.user_id == user_id)
@@ -103,16 +116,25 @@ def get_token_usage_history(
 
     results = query.all()
     
+    print(f"[DEBUG] 조회 결과: {len(results)}개 레코드")
+    
+    # 처음 5개 레코드의 timestamp 출력
+    if results:
+        print(f"[DEBUG] 처음 5개 레코드 timestamp:")
+        for i, usage in enumerate(results[:5]):
+            print(f"  {i+1}. {usage.timestamp}")
+    
     return [
         {
-            "timestamp": usage.timestamp,
+            "timestamp": usage.timestamp.isoformat() if usage.timestamp else None,
             "model": usage.model,
             "input_tokens": usage.input_tokens,
             "output_tokens": usage.output_tokens,
             "chat_type": "수행평가" if usage.chat_type == "project_assignment" else 
                         "생기부" if usage.chat_type == "project_record" else "Default",
             "user_email": usage.user_email,
-            "user_name": usage.user_name
+            "user_name": usage.user_name,
+            "status": "completed"  # 기본값으로 완료 상태 설정
         }
         for usage in results
     ]
@@ -132,9 +154,21 @@ def get_chat_statistics(
             for user in db.query(User).all()
         }
 
-        # 채팅방 수 쿼리 - 각각 별도로 실행
+        # 채팅방 수 쿼리 - 날짜 필터링을 선택적으로 적용
         project_chat_query = db.query(func.count(ProjectChat.id))
         chat_room_query = db.query(func.count(ChatRoom.id))
+        
+        # 날짜 필터링 적용 - start_date와 end_date가 모두 있을 때만 적용
+        if start_date is not None and end_date is not None:
+            project_chat_query = project_chat_query.filter(ProjectChat.created_at.between(start_date, end_date))
+            chat_room_query = chat_room_query.filter(ChatRoom.created_at.between(start_date, end_date))
+        elif start_date is not None:
+            project_chat_query = project_chat_query.filter(ProjectChat.created_at >= start_date)
+            chat_room_query = chat_room_query.filter(ChatRoom.created_at >= start_date)
+        elif end_date is not None:
+            project_chat_query = project_chat_query.filter(ProjectChat.created_at <= end_date)
+            chat_room_query = chat_room_query.filter(ChatRoom.created_at <= end_date)
+        # 날짜 필터링이 없으면 모든 데이터 조회
         
         if user_id:
             project_chat_query = project_chat_query.filter(ProjectChat.user_id == user_id)
@@ -144,9 +178,21 @@ def get_chat_statistics(
         chat_room_count = chat_room_query.scalar() or 0
         total_chats = project_chat_count + chat_room_count
 
-        # 메시지 수 쿼리
+        # 메시지 수 쿼리 - 날짜 필터링을 선택적으로 적용
         message_query = db.query(func.count(ChatMessage.id))
         project_message_query = db.query(func.count(ProjectMessage.id))
+        
+        # 날짜 필터링 적용 - start_date와 end_date가 모두 있을 때만 적용
+        if start_date is not None and end_date is not None:
+            message_query = message_query.filter(ChatMessage.created_at.between(start_date, end_date))
+            project_message_query = project_message_query.filter(ProjectMessage.created_at.between(start_date, end_date))
+        elif start_date is not None:
+            message_query = message_query.filter(ChatMessage.created_at >= start_date)
+            project_message_query = project_message_query.filter(ProjectMessage.created_at >= start_date)
+        elif end_date is not None:
+            message_query = message_query.filter(ChatMessage.created_at <= end_date)
+            project_message_query = project_message_query.filter(ProjectMessage.created_at <= end_date)
+        # 날짜 필터링이 없으면 모든 데이터 조회
         
         if user_id:
             message_query = message_query.join(
@@ -161,33 +207,61 @@ def get_chat_statistics(
         project_message_count = project_message_query.scalar() or 0
         total_messages = message_count + project_message_count
 
-        # 사용자별 채팅방 수 쿼리
-        user_chat_stats = db.query(
+        # 사용자별 채팅방 수 쿼리 - 날짜 필터링 적용
+        user_chat_stats_query = db.query(
             ChatRoom.user_id,
             func.count(ChatRoom.id).label('chat_count')
-        ).group_by(ChatRoom.user_id).all()
+        )
+        if start_date is not None and end_date is not None:
+            user_chat_stats_query = user_chat_stats_query.filter(ChatRoom.created_at.between(start_date, end_date))
+        elif start_date is not None:
+            user_chat_stats_query = user_chat_stats_query.filter(ChatRoom.created_at >= start_date)
+        elif end_date is not None:
+            user_chat_stats_query = user_chat_stats_query.filter(ChatRoom.created_at <= end_date)
+        user_chat_stats = user_chat_stats_query.group_by(ChatRoom.user_id).all()
 
-        user_project_stats = db.query(
+        user_project_stats_query = db.query(
             ProjectChat.user_id,
             func.count(ProjectChat.id).label('project_count')
-        ).group_by(ProjectChat.user_id).all()
+        )
+        if start_date is not None and end_date is not None:
+            user_project_stats_query = user_project_stats_query.filter(ProjectChat.created_at.between(start_date, end_date))
+        elif start_date is not None:
+            user_project_stats_query = user_project_stats_query.filter(ProjectChat.created_at >= start_date)
+        elif end_date is not None:
+            user_project_stats_query = user_project_stats_query.filter(ProjectChat.created_at <= end_date)
+        user_project_stats = user_project_stats_query.group_by(ProjectChat.user_id).all()
 
-        # 사용자별 메시지 수 쿼리
-        user_message_stats = db.query(
+        # 사용자별 메시지 수 쿼리 - 날짜 필터링 적용
+        user_message_stats_query = db.query(
             ChatRoom.user_id,
             func.count(ChatMessage.id).label('message_count')
         ).join(
             ChatMessage, ChatMessage.room_id == ChatRoom.id
-        ).group_by(ChatRoom.user_id).all()
+        )
+        if start_date is not None and end_date is not None:
+            user_message_stats_query = user_message_stats_query.filter(ChatMessage.created_at.between(start_date, end_date))
+        elif start_date is not None:
+            user_message_stats_query = user_message_stats_query.filter(ChatMessage.created_at >= start_date)
+        elif end_date is not None:
+            user_message_stats_query = user_message_stats_query.filter(ChatMessage.created_at <= end_date)
+        user_message_stats = user_message_stats_query.group_by(ChatRoom.user_id).all()
 
-        user_project_message_stats = db.query(
+        user_project_message_stats_query = db.query(
             ProjectChat.user_id,
             func.count(ProjectMessage.id).label('message_count')
         ).join(
             ProjectMessage, ProjectMessage.room_id == ProjectChat.id
-        ).group_by(ProjectChat.user_id).all()
+        )
+        if start_date is not None and end_date is not None:
+            user_project_message_stats_query = user_project_message_stats_query.filter(ProjectMessage.created_at.between(start_date, end_date))
+        elif start_date is not None:
+            user_project_message_stats_query = user_project_message_stats_query.filter(ProjectMessage.created_at >= start_date)
+        elif end_date is not None:
+            user_project_message_stats_query = user_project_message_stats_query.filter(ProjectMessage.created_at <= end_date)
+        user_project_message_stats = user_project_message_stats_query.group_by(ProjectChat.user_id).all()
 
-        # 사용자별 토큰 사용량 쿼리
+        # 사용자별 토큰 사용량 쿼리 - 날짜 필터링을 선택적으로 적용
         user_token_stats = db.query(
             TokenUsage.user_id,
             func.sum(TokenUsage.input_tokens).label('total_input_tokens'),
@@ -195,7 +269,21 @@ def get_chat_statistics(
             func.sum(TokenUsage.cache_write_tokens).label('total_cache_write_tokens'),
             func.sum(TokenUsage.cache_hit_tokens).label('total_cache_hit_tokens'),
             TokenUsage.chat_type
-        ).group_by(TokenUsage.user_id, TokenUsage.chat_type).all()
+        )
+        
+        # 날짜 필터링 적용 - start_date와 end_date가 모두 있을 때만 적용
+        if start_date is not None and end_date is not None:
+            user_token_stats = user_token_stats.filter(TokenUsage.timestamp.between(start_date, end_date))
+        elif start_date is not None:
+            user_token_stats = user_token_stats.filter(TokenUsage.timestamp >= start_date)
+        elif end_date is not None:
+            user_token_stats = user_token_stats.filter(TokenUsage.timestamp <= end_date)
+        # 날짜 필터링이 없으면 모든 데이터 조회
+        
+        if user_id:
+            user_token_stats = user_token_stats.filter(TokenUsage.user_id == user_id)
+        
+        user_token_stats = user_token_stats.group_by(TokenUsage.user_id, TokenUsage.chat_type).all()
 
         # 사용자별 통계 집계
         user_stats = {}
@@ -283,7 +371,7 @@ def get_chat_statistics(
                 'cache_hit_tokens': (user_stats[stat.user_id]['cache_hit_tokens'] + (stat.total_cache_hit_tokens or 0))
             })
 
-        # 프로젝트별 통계 쿼리
+        # 프로젝트별 통계 쿼리 - 날짜 필터링 적용
         project_query = db.query(
             ProjectChat.project_id,
             ProjectChat.user_id,
@@ -294,7 +382,20 @@ def get_chat_statistics(
             ProjectMessage, ProjectMessage.room_id == ProjectChat.id
         ).outerjoin(
             TokenUsage, TokenUsage.room_id == ProjectChat.id
-        ).group_by(
+        )
+        
+        # 날짜 필터링 적용
+        if start_date is not None and end_date is not None:
+            project_query = project_query.filter(ProjectMessage.created_at.between(start_date, end_date))
+            project_query = project_query.filter(TokenUsage.timestamp.between(start_date, end_date))
+        elif start_date is not None:
+            project_query = project_query.filter(ProjectMessage.created_at >= start_date)
+            project_query = project_query.filter(TokenUsage.timestamp >= start_date)
+        elif end_date is not None:
+            project_query = project_query.filter(ProjectMessage.created_at <= end_date)
+            project_query = project_query.filter(TokenUsage.timestamp <= end_date)
+        
+        project_query = project_query.group_by(
             ProjectChat.project_id, ProjectChat.user_id
         )
         if user_id:

@@ -656,7 +656,9 @@ async def generate_gemini_stream_response(
                 thinking_token_count = await count_gemini_tokens(accumulated_thinking, model, client)
                 thinking_tokens = thinking_token_count.get("input_tokens", 0)
 
-            # 토큰 사용량 저장
+            # 토큰 사용량 저장 (KST 시간으로 저장)
+            from pytz import timezone
+            kst = timezone('Asia/Seoul')
             crud_stats.create_token_usage(
                 db=db,
                 user_id=user_id,
@@ -664,7 +666,7 @@ async def generate_gemini_stream_response(
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens + thinking_tokens,  # 사고 토큰 포함
-                timestamp=datetime.now()
+                timestamp=datetime.now(kst)
             )
 
         except (ConnectionError, BrokenPipeError, GeneratorExit):
@@ -1100,14 +1102,16 @@ async def get_token_usage(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 문자열을 datetime으로 변환
+    # KST 시간 문자열을 datetime으로 변환
     start_dt = None
     end_dt = None
     
     if start_date:
-        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
     if end_date:
-        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
     
     return crud_stats.get_token_usage(
         db=db,
@@ -1124,14 +1128,16 @@ async def get_chat_usage(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 문자열을 datetime으로 변환
+    # KST 시간 문자열을 datetime으로 변환
     start_dt = None
     end_dt = None
     
     if start_date:
-        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
     if end_date:
-        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
     
     return crud_stats.get_chat_statistics(
         db=db,
@@ -1148,14 +1154,16 @@ async def get_token_usage_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 문자열을 datetime으로 변환
+    # KST 시간 문자열을 datetime으로 변환
     start_dt = None
     end_dt = None
     
     if start_date:
-        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
     if end_date:
-        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        # "YYYY-MM-DD HH:MM:SS" 형식의 KST 시간을 파싱
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
     
     return crud_stats.get_token_usage_history(
         db=db,

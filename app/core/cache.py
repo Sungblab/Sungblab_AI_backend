@@ -7,6 +7,11 @@ import hashlib
 from app.core.config import settings
 from functools import wraps
 import asyncio
+import time
+from typing import Optional, Dict, Any
+import json
+import hashlib
+from datetime import datetime, timedelta
 
 class CacheManager:
     """통합 캐시 관리자"""
@@ -227,3 +232,84 @@ class VectorSearchCache:
         query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
         key = VectorSearchCache.get_search_key(project_id, query_hash, top_k, threshold)
         return cache_manager.get(key) 
+
+class SimpleCache:
+    def __init__(self, default_ttl: int = 300):  # 5분 기본 TTL
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._default_ttl = default_ttl
+    
+    def _generate_key(self, prefix: str, data: Any) -> str:
+        """데이터 기반 캐시 키 생성"""
+        if isinstance(data, dict):
+            data_str = json.dumps(data, sort_keys=True)
+        else:
+            data_str = str(data)
+        return f"{prefix}:{hashlib.md5(data_str.encode()).hexdigest()}"
+    
+    def get(self, key: str) -> Optional[Any]:
+        """캐시에서 값 조회"""
+        if key in self._cache:
+            item = self._cache[key]
+            if time.time() < item['expires_at']:
+                return item['value']
+            else:
+                del self._cache[key]
+        return None
+    
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """캐시에 값 저장"""
+        ttl = ttl or self._default_ttl
+        self._cache[key] = {
+            'value': value,
+            'expires_at': time.time() + ttl,
+            'created_at': time.time()
+        }
+    
+    def delete(self, key: str) -> bool:
+        """캐시에서 키 삭제"""
+        if key in self._cache:
+            del self._cache[key]
+            return True
+        return False
+    
+    def clear(self) -> None:
+        """전체 캐시 삭제"""
+        self._cache.clear()
+    
+    def cleanup_expired(self) -> None:
+        """만료된 캐시 정리"""
+        current_time = time.time()
+        expired_keys = [
+            key for key, item in self._cache.items()
+            if current_time >= item['expires_at']
+        ]
+        for key in expired_keys:
+            del self._cache[key]
+
+# 전역 캐시 인스턴스
+cache = SimpleCache(default_ttl=300)  # 5분
+
+# 캐시 데코레이터
+def cached(ttl: int = 300, prefix: str = "api"):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # 캐시 키 생성
+            cache_key = cache._generate_key(prefix, {
+                'func': func.__name__,
+                'args': args,
+                'kwargs': kwargs
+            })
+            
+            # 캐시에서 조회
+            cached_result = cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # 캐시 미스 시 함수 실행
+            result = func(*args, **kwargs)
+            
+            # 결과 캐싱
+            cache.set(cache_key, result, ttl)
+            return result
+        return wrapper
+    return decorator 

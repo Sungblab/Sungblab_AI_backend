@@ -6,6 +6,7 @@ from app.db.init_db import init_db
 from app.core.error_handlers import setup_error_handlers, ErrorMonitoringMiddleware
 from app.core.error_tracking import init_sentry
 from app.core.structured_logging import StructuredLogger
+from app.middleware.performance import PerformanceMonitoringMiddleware
 import logging
 import pytz
 from datetime import datetime
@@ -17,10 +18,10 @@ KST = pytz.timezone('Asia/Seoul')
 datetime.now(KST)  # 시스템 전체 시간대 설정
 
 # 로깅 설정
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-logging.getLogger("alembic").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
+logging.getLogger("alembic").setLevel(logging.INFO)
 
 # 구조화된 로깅 초기화
 structured_logger = StructuredLogger("sungblab_api")
@@ -114,6 +115,9 @@ init_sentry()
 
 # 글로벌 에러 핸들러 설정
 setup_error_handlers(app)
+
+# 성능 모니터링 미들웨어 추가 (다른 미들웨어보다 먼저)
+app.add_middleware(PerformanceMonitoringMiddleware, slow_request_threshold=2.0)
 
 # 에러 모니터링 미들웨어 추가
 app.add_middleware(ErrorMonitoringMiddleware)
