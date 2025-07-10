@@ -9,20 +9,21 @@ from datetime import datetime
 from app.core.config import settings
 
 def setup_logging(
-    log_level: str = "INFO",
+    log_level: str = "WARNING",  # INFO에서 WARNING으로 변경
     log_file: Optional[str] = None,
-    max_file_size: int = 10 * 1024 * 1024,  # 10MB
-    backup_count: int = 5,
-    log_format: Optional[str] = None
+    max_file_size: int = 2 * 1024 * 1024,  # 2MB (5MB에서 2MB로 줄임)
+    backup_count: int = 1,  # 2개에서 1개로 줄임
+    log_format: Optional[str] = None,
+    enable_file_logging: bool = False  # 파일 로깅 비활성화 옵션 추가
 ):
-    """로깅 설정"""
+    """로깅 설정 - 최소화된 로깅"""
     
     # 로그 레벨 설정
-    level = getattr(logging, log_level.upper(), logging.INFO)
+    level = getattr(logging, log_level.upper(), logging.WARNING)
     
-    # 로그 포맷 설정
+    # 로그 포맷 설정 (더 간단하게)
     if log_format is None:
-        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        log_format = "%(levelname)s - %(name)s - %(message)s"  # 타임스탬프 제거
     
     formatter = logging.Formatter(log_format)
     
@@ -40,91 +41,38 @@ def setup_logging(
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     
-    # 파일 핸들러 추가 (순환 로그)
-    if log_file:
+    # 파일 로깅이 활성화된 경우에만 파일 핸들러 추가
+    if enable_file_logging and log_file:
         # 로그 디렉토리 생성
         log_dir = os.path.dirname(log_file)
         if log_dir and not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
         
-        # 순환 파일 핸들러
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_file_size,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        file_handler.setLevel(level)
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
-    
-    # 성능 로그 별도 설정
-    performance_logger = logging.getLogger("performance")
-    performance_logger.setLevel(logging.INFO)
-    
-    if log_file:
-        # 성능 로그 전용 파일
-        perf_log_file = log_file.replace('.log', '_performance.log')
-        perf_handler = logging.handlers.RotatingFileHandler(
-            perf_log_file,
-            maxBytes=max_file_size,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        perf_handler.setLevel(logging.INFO)
-        perf_handler.setFormatter(formatter)
-        performance_logger.addHandler(perf_handler)
-    
-    # 에러 로그 별도 설정
-    error_logger = logging.getLogger("error")
-    error_logger.setLevel(logging.ERROR)
-    
-    if log_file:
-        # 에러 로그 전용 파일
-        error_log_file = log_file.replace('.log', '_error.log')
+        # 에러 로그만 파일에 저장 (WARNING 이상만)
+        error_log_file = log_file.replace('.log', '_errors.log')
         error_handler = logging.handlers.RotatingFileHandler(
             error_log_file,
             maxBytes=max_file_size,
             backupCount=backup_count,
             encoding='utf-8'
         )
-        error_handler.setLevel(logging.ERROR)
+        error_handler.setLevel(logging.WARNING)  # WARNING 이상만 파일에 저장
         error_handler.setFormatter(formatter)
-        error_logger.addHandler(error_handler)
+        root_logger.addHandler(error_handler)
+        
+    # 외부 라이브러리 로깅 최소화
+    logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
+    logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.ERROR)
+    logging.getLogger("alembic").setLevel(logging.ERROR)
+    logging.getLogger("httpx").setLevel(logging.ERROR)
+    logging.getLogger("httpcore").setLevel(logging.ERROR)
     
-    # 헬스 모니터 로그 별도 설정
-    health_logger = logging.getLogger("health_monitor")
-    health_logger.setLevel(logging.INFO)
-    
-    if log_file:
-        # 헬스 로그 전용 파일
-        health_log_file = log_file.replace('.log', '_health.log')
-        health_handler = logging.handlers.RotatingFileHandler(
-            health_log_file,
-            maxBytes=max_file_size,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        health_handler.setLevel(logging.INFO)
-        health_handler.setFormatter(formatter)
-        health_logger.addHandler(health_handler)
-    
-    # 메모리 관리 로그 별도 설정
-    memory_logger = logging.getLogger("memory_manager")
-    memory_logger.setLevel(logging.INFO)
-    
-    if log_file:
-        # 메모리 로그 전용 파일
-        memory_log_file = log_file.replace('.log', '_memory.log')
-        memory_handler = logging.handlers.RotatingFileHandler(
-            memory_log_file,
-            maxBytes=max_file_size,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        memory_handler.setLevel(logging.INFO)
-        memory_handler.setFormatter(formatter)
-        memory_logger.addHandler(memory_handler)
+    # 기타 로거들도 최소화
+    for logger_name in ["performance", "health_monitor", "memory_manager"]:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.ERROR)  # ERROR 레벨로 설정
+        logger.propagate = True  # 루트 로거로 전파
 
 def setup_time_based_logging(
     log_level: str = "INFO",
@@ -178,22 +126,27 @@ def setup_time_based_logging(
         time_handler.setFormatter(formatter)
         root_logger.addHandler(time_handler)
 
-def cleanup_old_logs(log_directory: str, max_age_days: int = 30):
-    """오래된 로그 파일 정리"""
+def cleanup_old_logs(log_directory: str, max_age_days: int = 7):  # 30일에서 7일로 줄임
+    """오래된 로그 파일 정리 - 더 자주 정리"""
     if not os.path.exists(log_directory):
         return
     
     cutoff_time = datetime.now().timestamp() - (max_age_days * 24 * 3600)
+    cleaned_files = []
     
     for filename in os.listdir(log_directory):
-        if filename.endswith('.log') or filename.endswith('.log.1'):
+        if filename.endswith('.log') or '.log.' in filename:
             filepath = os.path.join(log_directory, filename)
             try:
                 if os.path.getctime(filepath) < cutoff_time:
+                    file_size = os.path.getsize(filepath)
                     os.remove(filepath)
-                    print(f"Removed old log file: {filepath}")
+                    cleaned_files.append(f"{filename} ({file_size / (1024*1024):.2f}MB)")
             except OSError as e:
                 print(f"Error removing log file {filepath}: {e}")
+    
+    if cleaned_files:
+        print(f"Cleaned {len(cleaned_files)} old log files: {', '.join(cleaned_files)}")
 
 def get_log_files_info(log_directory: str) -> dict:
     """로그 파일 정보 반환"""
@@ -229,10 +182,10 @@ def get_log_files_info(log_directory: str) -> dict:
 
 # 기본 로깅 설정 적용
 def init_logging():
-    """기본 로깅 설정 초기화"""
+    """기본 로깅 설정 초기화 - 최소화된 로깅"""
     log_file = None
     
-    # 로그 디렉토리 설정
+    # 로그 디렉토리 설정 (하지만 기본적으로 파일 로깅 비활성화)
     if hasattr(settings, 'LOG_FILE') and settings.LOG_FILE:
         log_file = settings.LOG_FILE
     else:
@@ -241,18 +194,19 @@ def init_logging():
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, 'sungblab_api.log')
     
-    # 로깅 설정 적용
+    # 최소화된 로깅 설정 적용
     setup_logging(
-        log_level=settings.LOG_LEVEL,
+        log_level="WARNING",  # WARNING 레벨로 설정
         log_file=log_file,
-        max_file_size=10 * 1024 * 1024,  # 10MB
-        backup_count=5,
-        log_format=settings.LOG_FORMAT
+        max_file_size=2 * 1024 * 1024,  # 2MB
+        backup_count=1,  # 1개
+        log_format="%(levelname)s - %(name)s - %(message)s",
+        enable_file_logging=False  # 파일 로깅 비활성화
     )
     
-    # 오래된 로그 정리 (30일 이상)
+    # 로그 정리 (시작 시 기존 로그 파일들 정리)
     if log_file:
         log_directory = os.path.dirname(log_file)
-        cleanup_old_logs(log_directory, max_age_days=30)
+        cleanup_old_logs(log_directory, max_age_days=1)  # 1일 이상된 로그 즉시 정리
     
-    logging.info("Logging system initialized") 
+    logging.warning("Logging system initialized with minimal logging") 

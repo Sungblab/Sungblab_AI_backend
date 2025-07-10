@@ -18,10 +18,16 @@ class Settings(BaseSettings):
     ADMIN_INITIAL_PASSWORD: str
     CREATE_INITIAL_ADMIN: bool = False
     
-    # 로깅 설정
-    LOG_LEVEL: str = "INFO"
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    # 로깅 설정 (최소화)
+    LOG_LEVEL: str = "WARNING"
+    LOG_FORMAT: str = "%(levelname)s - %(name)s - %(message)s"
     LOG_FILE: Optional[str] = None
+    
+    # 시스템 모니터링 설정 (메모리 사용량 최소화)
+    ENABLE_MEMORY_MANAGER: bool = False
+    ENABLE_HEALTH_MONITOR: bool = True  # health API 필요하므로 유지
+    ENABLE_SCHEDULED_TASKS: bool = False
+    ENABLE_PERFORMANCE_MONITORING: bool = False
     
     # JWT 설정
     SECRET_KEY: str

@@ -31,3 +31,4 @@ celery
 prometheus-client
 sentry-sdk[fastapi]
 psutil
+schedule
