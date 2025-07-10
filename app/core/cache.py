@@ -21,9 +21,14 @@ class CacheManager:
         self.redis_client = redis.Redis.from_url(
             settings.REDIS_URL if hasattr(settings, 'REDIS_URL') 
             else "redis://localhost:6379",
-            decode_responses=False  # 바이너리 데이터 지원
+            decode_responses=False,  # 바이너리 데이터 지원
+            max_connections=20,  # 최대 연결 수 제한
+            retry_on_timeout=True,
+            socket_timeout=5,
+            socket_connect_timeout=5
         )
-        self.default_ttl = 3600  # 1시간
+        self.default_ttl = 1800  # 30분으로 감소
+        self.max_cache_size = 100 * 1024 * 1024  # 100MB 제한
     
     def _generate_key(self, prefix: str, *args, **kwargs) -> str:
         """캐시 키 생성"""
@@ -76,6 +81,66 @@ class CacheManager:
             return 0
         except Exception as e:
             print(f"Cache clear pattern error: {e}")
+            return 0
+    
+    def get_cache_size(self) -> int:
+        """캐시 크기 반환 (바이트)"""
+        try:
+            info = self.redis_client.info('memory')
+            return info.get('used_memory', 0)
+        except Exception as e:
+            print(f"Cache size check error: {e}")
+            return 0
+    
+    def cleanup_expired_keys(self) -> int:
+        """만료된 키들 정리"""
+        try:
+            # Redis의 SCAN 명령으로 키들을 안전하게 조회
+            count = 0
+            cursor = 0
+            while True:
+                cursor, keys = self.redis_client.scan(cursor, count=100)
+                for key in keys:
+                    if self.redis_client.ttl(key) == -1:  # TTL이 설정되지 않은 키
+                        self.redis_client.expire(key, self.default_ttl)
+                        count += 1
+                if cursor == 0:
+                    break
+            return count
+        except Exception as e:
+            print(f"Cache cleanup error: {e}")
+            return 0
+    
+    def clear_old_cache(self, max_age_hours: int = 24) -> int:
+        """오래된 캐시 정리"""
+        try:
+            # 메모리 사용량이 한계를 넘으면 LRU 정책으로 정리
+            cache_size = self.get_cache_size()
+            if cache_size > self.max_cache_size:
+                # 가장 오래된 키들부터 삭제
+                keys = self.redis_client.keys('*')
+                # 키들을 생성 시간순으로 정렬 (근사치)
+                keys_with_ttl = []
+                for key in keys[:1000]:  # 최대 1000개만 체크
+                    ttl = self.redis_client.ttl(key)
+                    if ttl > 0:
+                        keys_with_ttl.append((key, ttl))
+                
+                # TTL이 낮은 순서대로 정렬 (곧 만료될 키들)
+                keys_with_ttl.sort(key=lambda x: x[1])
+                
+                # 메모리 사용량을 제한 이하로 줄일 때까지 삭제
+                deleted = 0
+                for key, _ in keys_with_ttl:
+                    if self.get_cache_size() <= self.max_cache_size * 0.8:
+                        break
+                    self.redis_client.delete(key)
+                    deleted += 1
+                
+                return deleted
+            return 0
+        except Exception as e:
+            print(f"Old cache cleanup error: {e}")
             return 0
 
 # 전역 캐시 매니저

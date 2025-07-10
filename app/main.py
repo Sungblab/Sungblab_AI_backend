@@ -7,6 +7,9 @@ from app.core.error_handlers import setup_error_handlers, ErrorMonitoringMiddlew
 from app.core.error_tracking import init_sentry
 from app.core.structured_logging import StructuredLogger
 from app.middleware.performance import PerformanceMonitoringMiddleware
+from app.core.memory_manager import memory_manager
+from app.core.health_monitor import health_monitor
+from app.core.logging_config import init_logging
 import logging
 import pytz
 from datetime import datetime
@@ -140,10 +143,23 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    # 로깅 시스템 초기화
+    init_logging()
+    print("startup_event", {"message": "Logging system initialized"})
+    
     print("startup_event", {"message": "Initializing database..."})
     try:
         init_db()
         print("startup_event", {"message": "Database initialization complete"})
+        
+        # 메모리 관리자 시작
+        memory_manager.start()
+        print("startup_event", {"message": "Memory manager started"})
+        
+        # 헬스 모니터 시작
+        health_monitor.start()
+        print("startup_event", {"message": "Health monitor started"})
+        
     except Exception as e:
         structured_logger.log_error(
             error=e,
@@ -152,6 +168,19 @@ async def startup_event():
         structured_logger.warning("startup_event", {
             "message": "Application will start without database initialization"
         })
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """애플리케이션 종료 시 정리 작업"""
+    print("shutdown_event", {"message": "Shutting down application..."})
+    
+    # 메모리 관리자 중지
+    memory_manager.stop()
+    print("shutdown_event", {"message": "Memory manager stopped"})
+    
+    # 헬스 모니터 중지
+    health_monitor.stop()
+    print("shutdown_event", {"message": "Health monitor stopped"})
 
 app.include_router(api_router, prefix=settings.API_V1_STR.strip())
 
@@ -170,11 +199,4 @@ def read_root():
         "redoc_url": f"{settings.API_V1_STR}/redoc"
     }
 
-@app.get("/health", tags=["health"])
-def health_check():
-    """
-    헬스 체크 엔드포인트
-    
-    API 서버의 상태를 확인하는 엔드포인트입니다.
-    """
-    return {"status": "healthy", "timestamp": datetime.now(KST).isoformat()} 
+ 
