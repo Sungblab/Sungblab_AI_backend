@@ -30,25 +30,29 @@ fi
 
 # Redis 연결 대기 (클라우드 타입 환경)
 echo "Waiting for Redis..."
+echo "REDIS_URL: $REDIS_URL"
 redis_counter=0
 redis_max_retries=30
 
-# REDIS_URL에서 호스트와 포트 추출
-REDIS_HOST=$(echo "$REDIS_URL" | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
-REDIS_PORT=$(echo "$REDIS_URL" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+# 클라우드 타입 환경에서는 Redis가 내부적으로 6379 포트로 실행됨
+# 외부 포트 30641은 포트 포워딩용이므로 내부 포트 6379 사용
+REDIS_HOST="redis"
+REDIS_PORT="6379"
 
-# 기본값 설정
-REDIS_HOST=${REDIS_HOST:-"localhost"}
-REDIS_PORT=${REDIS_PORT:-"6379"}
+echo "Using internal Redis connection: $REDIS_HOST:$REDIS_PORT"
 
 while [ $redis_counter -lt $redis_max_retries ]
 do
-    if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping > /dev/null 2>&1; then
+    echo "Attempting Redis connection to $REDIS_HOST:$REDIS_PORT (Attempt $((redis_counter+1))/$redis_max_retries)"
+    
+    # Redis 연결 테스트 (더 자세한 출력)
+    if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>&1 | grep -q "PONG"; then
         echo "Redis is ready!"
         break
+    else
+        echo "Redis connection failed. Error: $(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>&1)"
     fi
-    echo "Waiting for Redis... Attempt $((redis_counter+1))/$redis_max_retries"
-    echo "Trying to connect to Redis at $REDIS_HOST:$REDIS_PORT"
+    
     redis_counter=$((redis_counter+1))
     sleep 2
 done

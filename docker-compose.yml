@@ -31,8 +31,21 @@ services:
       - DEBUG=true
       - REDIS_URL=${REDIS_URL}
     command: ./start.sh
+    depends_on:
+      - redis
     networks:
       - app-network
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+volumes:
+  redis_data:
 
 networks:
   app-network:
