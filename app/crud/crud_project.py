@@ -4,16 +4,13 @@ from app.models.project import Project, ProjectChat, ProjectMessage
 from app.models.user import User
 from app.models.subscription import Subscription
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectChatCreate, ProjectChatUpdate
-from app.schemas.chat import ChatCreate, ChatUpdate, ChatMessageCreate
+from app.schemas.chat import ChatUpdate, ChatMessageCreate
 import uuid
-from datetime import datetime
-from app.core.models import get_model_config, ModelProvider
+from datetime import datetime, timezone
+from app.core.models import get_model_config, ModelProvider, MODEL_GROUP_MAPPING
+import logging
 
-# 모델 그룹 매핑 (제미나이만)
-MODEL_GROUP_MAPPING = {
-    "gemini-2.5-pro": "gemini",
-    "gemini-2.5-flash": "gemini",
-}
+logger = logging.getLogger(__name__)
 
 # 모델별 프로바이더 매핑 - 제미나이만 사용
 def get_model_provider_mapping():
@@ -31,8 +28,8 @@ def create_with_owner(
 ) -> Project:
     obj_in_data = obj_in.dict()
     obj_in_data["user_id"] = owner_id
-    obj_in_data["created_at"] = datetime.now()
-    obj_in_data["updated_at"] = datetime.now()
+    obj_in_data["created_at"] = datetime.now(timezone.utc)
+    obj_in_data["updated_at"] = datetime.now(timezone.utc)
     db_obj = Project(**obj_in_data)
     db.add(db_obj)
     db.commit()
@@ -59,14 +56,15 @@ def create_chat(
         Project.user_id == owner_id
     ).first()
     if not project:
+        logger.error(f"Project with ID {project_id} not found or access denied for user {owner_id}")
         raise ValueError("Project not found or access denied")
     
     # 채팅 생성
     chat_data = obj_in.dict()
     chat_data["project_id"] = project_id
     chat_data["user_id"] = owner_id  # user_id 추가
-    chat_data["created_at"] = datetime.now()
-    chat_data["updated_at"] = datetime.now()
+    chat_data["created_at"] = datetime.now(timezone.utc)
+    chat_data["updated_at"] = datetime.now(timezone.utc)
     
     # 특정 ID가 제공된 경우 사용
     if chat_id:
@@ -102,6 +100,7 @@ def update_chat(
         Project.user_id == owner_id
     ).first()
     if not project:
+        logger.error(f"Project with ID {project_id} not found or access denied for user {owner_id}")
         raise ValueError("Project not found or access denied")
     
     # 채팅 업데이트
@@ -113,7 +112,7 @@ def update_chat(
         raise ValueError("Chat not found")
     
     update_data = obj_in.dict(exclude_unset=True)
-    update_data["updated_at"] = datetime.now()
+    update_data["updated_at"] = datetime.now(timezone.utc)
     
     for field, value in update_data.items():
         setattr(chat, field, value)
@@ -251,7 +250,7 @@ def create_chat_message(
         raise ValueError("Chat not found")
     
     try:
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
         db_message = ProjectMessage(
             content=obj_in.content,
             role=obj_in.role,

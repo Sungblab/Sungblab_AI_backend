@@ -1,7 +1,6 @@
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from app.core.utils import get_kr_time
 
 from app.core.security import get_password_hash, verify_password
 from app.models.user import User, AuthProvider
@@ -21,7 +20,7 @@ def get_user_by_name(db: Session, full_name: str) -> Optional[User]:
 def get_user_by_reset_token(db: Session, token: str) -> Optional[User]:
     return db.query(User).filter(
         User.reset_password_token == token,
-        User.reset_password_token_expires > get_kr_time()
+        User.reset_password_token_expires > datetime.now(timezone.utc)
     ).first()
 
 def create_user(db: Session, *, obj_in: UserCreate) -> User:
@@ -41,10 +40,10 @@ def create_user(db: Session, *, obj_in: UserCreate) -> User:
         user_id=db_user.id,
         plan=SubscriptionPlan.FREE,
         status="active",
-        start_date=get_kr_time(),
-        end_date=get_kr_time() + timedelta(days=30),
+        start_date=datetime.now(timezone.utc),
+        end_date=datetime.now(timezone.utc) + timedelta(days=30),
         auto_renew=True,
-        renewal_date=get_kr_time() + timedelta(days=30),
+        renewal_date=datetime.now(timezone.utc) + timedelta(days=30),
         group_usage={
             "basic_chat": 0,
             "normal_analysis": 0,
@@ -59,7 +58,7 @@ def create_user(db: Session, *, obj_in: UserCreate) -> User:
 
 def update_password_reset_token(db: Session, user: User, token: str) -> User:
     user.reset_password_token = token
-    user.reset_password_token_expires = get_kr_time() + timedelta(hours=24)
+    user.reset_password_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
     db.commit()
     db.refresh(user)
     return user
@@ -108,10 +107,10 @@ def create_social_user(
         user_id=db_user.id,
         plan=SubscriptionPlan.FREE,
         status="active",
-        start_date=get_kr_time(),
-        end_date=get_kr_time() + timedelta(days=30),
+        start_date=datetime.now(timezone.utc),
+        end_date=datetime.now(timezone.utc) + timedelta(days=30),
         auto_renew=True,
-        renewal_date=get_kr_time() + timedelta(days=30),
+        renewal_date=datetime.now(timezone.utc) + timedelta(days=30),
         group_usage={
             "basic_chat": 0,
             "normal_analysis": 0,

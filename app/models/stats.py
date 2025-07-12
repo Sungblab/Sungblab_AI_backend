@@ -1,10 +1,8 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, func
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
-import uuid
-
-def generate_uuid():
-    return str(uuid.uuid4())
+from app.core.utils import generate_uuid
+from datetime import datetime, timezone
 
 class TokenUsage(Base):
     __tablename__ = "token_usage"
@@ -17,10 +15,8 @@ class TokenUsage(Base):
     output_tokens = Column(Integer, nullable=False)
     cache_write_tokens = Column(Integer, nullable=False, default=0)
     cache_hit_tokens = Column(Integer, nullable=False, default=0)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     chat_type = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     def to_dict(self):
         return {
@@ -33,5 +29,7 @@ class TokenUsage(Base):
             "cache_write_tokens": self.cache_write_tokens,
             "cache_hit_tokens": self.cache_hit_tokens,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
-            "chat_type": self.chat_type
+            "chat_type": self.chat_type,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
         } 

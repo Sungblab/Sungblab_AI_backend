@@ -3,16 +3,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool  # NullPool 대신 QueuePool 사용
 from app.core.config import settings
 
-# Supabase PostgreSQL 연결 설정 최적화
+
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URL,
     poolclass=QueuePool,  # 연결 풀 활성화
-    pool_size=3,  # 기본 연결 풀 크기 감소 (메모리 절약)
-    max_overflow=7,  # 최대 추가 연결 수 감소
+    pool_size=10,  # 기본 연결 풀 크기 증가 (동시 요청 대응)
+    max_overflow=20,  # 최대 추가 연결 수 증가 (총 30개)
     pool_pre_ping=True,
     pool_recycle=1800,  # 30분마다 연결 재활용 (더 자주)
     pool_reset_on_return='commit',  # 연결 반환 시 커밋
-    pool_timeout=30,  # 연결 대기 시간 제한
+    pool_timeout=15,  # 연결 대기 시간 제한 (단축)
     echo=False,  # SQL 로깅 비활성화 (성능 향상)
     connect_args={
         "connect_timeout": 10,  # 연결 타임아웃

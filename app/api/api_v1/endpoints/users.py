@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+import logging
 
 from app.core.security import get_current_user, get_password_hash, verify_password
 from app.db.session import get_db
@@ -9,10 +10,10 @@ from app.api import deps
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.user import User as UserModel
 from app.crud import crud_user
-from app.core.utils import get_kr_time
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/me", response_model=User)
 def read_current_user(
@@ -40,10 +41,10 @@ def get_my_subscription(
             user_id=str(current_user.id),
             plan=SubscriptionPlan.FREE,
             status="active",
-            start_date=get_kr_time(),
-            end_date=get_kr_time() + timedelta(days=30),
+            start_date=datetime.now(timezone.utc),
+            end_date=datetime.now(timezone.utc) + timedelta(days=30),
             auto_renew=True,
-            renewal_date=get_kr_time() + timedelta(days=30),
+            renewal_date=datetime.now(timezone.utc) + timedelta(days=30),
             group_usage={
                 "basic_chat": 0,
                 "normal_analysis": 0,
@@ -85,10 +86,7 @@ def delete_current_user(
         return {"message": "계정이 성공적으로 삭제되었습니다."}
     except Exception as e:
         db.rollback()
-        print(f"계정 삭제 중 오류 발생: {str(e)}")
-        # 더 자세한 에러 정보 출력
-        import traceback
-        traceback.print_exc()
+        logger.error(f"계정 삭제 중 오류 발생: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"계정 삭제 중 오류가 발생했습니다: {str(e)}"
@@ -132,8 +130,7 @@ def change_password(
     except HTTPException as e:
         raise e
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.error(f"비밀번호 변경 중 오류 발생: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(
             status_code=500,

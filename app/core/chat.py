@@ -4,6 +4,9 @@ import json
 from app.core.config import settings
 import base64
 import google.generativeai as genai
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_gemini_client():
     """Gemini 클라이언트를 생성하는 함수"""
@@ -15,7 +18,7 @@ def get_gemini_client():
         model = genai.GenerativeModel('gemini-pro')
         return model
     except Exception as e:
-        print(f"Gemini client creation error: {e}")
+        logger.error(f"Gemini client creation error: {e}", exc_info=True)
         return None
 
 async def get_chat_response(
@@ -73,4 +76,4 @@ async def get_chat_response(
 
     except Exception as e:
         error_response = {"error": str(e)}
-        yield f"data: {json.dumps(error_response)}\n\n" 
+        yield f"data: {json.dumps(error_response)}\n\n"} 

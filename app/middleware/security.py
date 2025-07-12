@@ -9,7 +9,7 @@ from app.core.config import settings
 import hashlib
 from datetime import datetime, timedelta
 
-logger = logging.getLogger("sungblab_api")
+logger = logging.getLogger(__name__)
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     """보안 강화 미들웨어"""
@@ -124,13 +124,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         
         # 요청 정보 로깅
         client_ip = self.get_client_ip(request)
-        print(f"Request: {request.method} {request.url.path} from {client_ip}")
+        logger.info(f"Request: {request.method} {request.url.path} from {client_ip}")
         
         response = await call_next(request)
         
         # 응답 정보 로깅
         process_time = time.time() - start_time
-        print(
+        logger.info(
             f"Response: {response.status_code} in {process_time:.3f}s "
             f"for {request.method} {request.url.path}"
         )

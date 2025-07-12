@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime, timezone
 from pydantic import BaseModel, EmailStr, constr
 from app.models.user import AuthProvider
 
@@ -15,6 +16,8 @@ class User(UserBase):
     is_superuser: bool = False
     auth_provider: AuthProvider = AuthProvider.LOCAL
     profile_image: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True

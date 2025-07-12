@@ -1,11 +1,4 @@
-import time
-import logging
-from typing import Callable
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-import psutil
-import os
-from datetime import datetime
+from app.core.config import settings
 
 # 성능 로깅 설정
 performance_logger = logging.getLogger("performance")
@@ -19,6 +12,9 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         self.slow_request_threshold = slow_request_threshold
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return await call_next(request)
+
         start_time = time.time()
         
         # 메모리 사용량 측정 (요청 시작 시점)
@@ -73,6 +69,8 @@ class DatabasePerformanceMonitor:
     
     def log_query(self, query: str, execution_time: float):
         """쿼리 실행 로그"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         self.query_count += 1
         self.total_query_time += execution_time
         
@@ -88,6 +86,8 @@ class DatabasePerformanceMonitor:
     
     def get_stats(self) -> dict:
         """성능 통계 반환"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return {}
         return {
             "total_queries": self.query_count,
             "total_query_time": round(self.total_query_time, 4),
@@ -100,6 +100,8 @@ class DatabasePerformanceMonitor:
     
     def reset_stats(self):
         """통계 초기화"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         self.query_count = 0
         self.total_query_time = 0
         self.slow_queries = []
@@ -110,6 +112,9 @@ db_monitor = DatabasePerformanceMonitor()
 def log_api_performance(func):
     """API 성능 로깅 데코레이터"""
     async def wrapper(*args, **kwargs):
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return await func(*args, **kwargs)
+
         start_time = time.time()
         try:
             result = await func(*args, **kwargs)

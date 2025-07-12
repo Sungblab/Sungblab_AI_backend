@@ -11,13 +11,13 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from app.core.security_enhanced import RedisRateLimiter, SecurityEnforcer, ThreatType, SecurityLevel
-from app.core.structured_logging import StructuredLogger
+from app.core.security import RedisRateLimiter, SecurityEnforcer, ThreatType, SecurityLevel
+import logging
 from app.core.exceptions import RateLimitError, ErrorCode
 from app.core.config import settings
 
 # 레이트 리미팅 로거
-rate_limit_logger = StructuredLogger("rate_limiting")
+rate_limit_logger = logging.getLogger("rate_limiting")
 
 class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
     """고도화된 레이트 리미팅 미들웨어"""
@@ -67,7 +67,7 @@ class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
             user_type = await self._get_user_type(request)
             api_type = self._get_api_type(request.url.path)
             
-            rate_limit_print("rate_limit_check_started", {
+            rate_limit_logger.info("rate_limit_check_started", extra={
                 "client_id": client_id,
                 "user_type": user_type,
                 "api_type": api_type,
@@ -100,7 +100,7 @@ class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
                 response.headers["X-RateLimit-Reset"] = str(int(time.time() + rate_info.get("window", 60)))
             
             # 성공 로깅
-            rate_limit_print("rate_limit_check_passed", {
+            rate_limit_logger.info("rate_limit_check_passed", extra={
                 "client_id": client_id,
                 "api_type": api_type,
                 "duration": time.time() - start_time,
@@ -111,7 +111,7 @@ class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
             return response
             
         except Exception as e:
-            rate_limit_logger.error("rate_limit_middleware_error", {
+            rate_limit_logger.error("rate_limit_middleware_error", extra={
                 "error": str(e),
                 "path": request.url.path,
                 "duration": time.time() - start_time
@@ -210,7 +210,7 @@ class AdvancedRateLimitingMiddleware(BaseHTTPMiddleware):
             "X-RateLimit-Reset": str(int(time.time() + rate_info.get("window", 60)))
         }
         
-        rate_limit_logger.warning("rate_limit_exceeded", {
+        rate_limit_logger.warning("rate_limit_exceeded", extra={
             "client_id": client_id,
             "api_type": api_type,
             "rate_info": rate_info,
@@ -254,7 +254,7 @@ class AdaptiveRateLimiter:
             # 시스템 부하가 높으면 제한 강화
             adjusted_requests = int(base_requests * self.load_adjustment_factor)
             
-            rate_limit_logger.warning("adaptive_rate_limiting_activated", {
+            rate_limit_logger.warning("adaptive_rate_limiting_activated", extra={
                 "system_load": system_load,
                 "threshold": self.system_load_threshold,
                 "original_limit": base_requests,
@@ -287,7 +287,7 @@ class AdaptiveRateLimiter:
             return system_load
             
         except Exception as e:
-            rate_limit_logger.error("system_load_calculation_failed", {
+            rate_limit_logger.error("system_load_calculation_failed", extra={
                 "error": str(e)
             })
             return 0.0  # 오류시 부하 없음으로 처리
@@ -333,7 +333,7 @@ class RateLimitingMetrics:
             }
             
         except Exception as e:
-            rate_limit_logger.error("rate_limiting_stats_failed", {
+            rate_limit_logger.error("rate_limiting_stats_failed", extra={
                 "error": str(e)
             })
             return {"error": "Failed to collect rate limiting stats"}
@@ -374,7 +374,7 @@ class RateLimitingMetrics:
             return violators[:limit]
             
         except Exception as e:
-            rate_limit_logger.error("top_violators_query_failed", {
+            rate_limit_logger.error("top_violators_query_failed", extra={
                 "error": str(e)
             })
             return []
@@ -418,7 +418,7 @@ async def check_api_rate_limit(
     except RateLimitError:
         raise
     except Exception as e:
-        rate_limit_logger.error("individual_rate_limit_check_failed", {
+        rate_limit_logger.error("individual_rate_limit_check_failed", extra={
             "error": str(e),
             "api_type": api_type
         })

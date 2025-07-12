@@ -68,13 +68,13 @@ class APIError(HTTPException):
     def __init__(
         self,
         error_code: ErrorCode,
-        message: str,
+        detail: str,
         status_code: int = 500,
         user_message: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
         severity: ErrorSeverity = ErrorSeverity.MEDIUM
     ):
-        super().__init__(status_code=status_code, detail=message)
+        super().__init__(status_code=status_code, detail=detail)
         self.error_code = error_code
         self.user_message = user_message or self._get_user_friendly_message(error_code)
         self.details = details or {}
@@ -127,10 +127,10 @@ class APIError(HTTPException):
 class ValidationError(APIError):
     """입력 검증 에러"""
     
-    def __init__(self, message: str, field_errors: Optional[List[Dict[str, str]]] = None):
+    def __init__(self, detail: str, field_errors: Optional[List[Dict[str, str]]] = None):
         super().__init__(
             error_code=ErrorCode.VALIDATION_ERROR,
-            message=message,
+            detail=detail,
             status_code=400,
             details={"field_errors": field_errors or []},
             severity=ErrorSeverity.LOW
@@ -139,10 +139,10 @@ class ValidationError(APIError):
 class AuthenticationError(APIError):
     """인증 에러"""
     
-    def __init__(self, message: str = "Authentication required"):
+    def __init__(self, detail: str = "Authentication required"):
         super().__init__(
             error_code=ErrorCode.UNAUTHORIZED,
-            message=message,
+            detail=detail,
             status_code=401,
             severity=ErrorSeverity.MEDIUM
         )
@@ -150,10 +150,10 @@ class AuthenticationError(APIError):
 class AuthorizationError(APIError):
     """인가 에러"""
     
-    def __init__(self, message: str = "Access denied"):
+    def __init__(self, detail: str = "Access denied"):
         super().__init__(
             error_code=ErrorCode.FORBIDDEN,
-            message=message,
+            detail=detail,
             status_code=403,
             severity=ErrorSeverity.MEDIUM
         )
@@ -162,12 +162,12 @@ class NotFoundError(APIError):
     """리소스 찾기 실패 에러"""
     
     def __init__(self, resource: str, identifier: Optional[str] = None):
-        message = f"{resource} not found"
+        detail = f"{resource} not found"
         if identifier:
-            message += f": {identifier}"
+            detail += f": {identifier}"
         super().__init__(
             error_code=ErrorCode.NOT_FOUND,
-            message=message,
+            detail=detail,
             status_code=404,
             severity=ErrorSeverity.LOW
         )
@@ -175,13 +175,13 @@ class NotFoundError(APIError):
 class RateLimitError(APIError):
     """레이트 리미팅 에러"""
     
-    def __init__(self, message: str = "Rate limit exceeded", retry_after: Optional[int] = None):
+    def __init__(self, detail: str = "Rate limit exceeded", retry_after: Optional[int] = None):
         details = {}
         if retry_after:
             details["retry_after"] = retry_after
         super().__init__(
             error_code=ErrorCode.RATE_LIMIT_EXCEEDED,
-            message=message,
+            detail=detail,
             status_code=429,
             details=details,
             severity=ErrorSeverity.LOW
@@ -190,7 +190,7 @@ class RateLimitError(APIError):
 class AIServiceError(APIError):
     """AI 서비스 에러"""
     
-    def __init__(self, message: str, model: Optional[str] = None, operation: Optional[str] = None):
+    def __init__(self, detail: str, model: Optional[str] = None, operation: Optional[str] = None):
         details = {}
         if model:
             details["model"] = model
@@ -198,7 +198,7 @@ class AIServiceError(APIError):
             details["operation"] = operation
         super().__init__(
             error_code=ErrorCode.AI_SERVICE_ERROR,
-            message=message,
+            detail=detail,
             status_code=500,
             details=details,
             severity=ErrorSeverity.HIGH
@@ -207,7 +207,7 @@ class AIServiceError(APIError):
 class UsageLimitError(APIError):
     """사용량 제한 에러"""
     
-    def __init__(self, message: str, current_usage: Optional[int] = None, limit: Optional[int] = None):
+    def __init__(self, detail: str, current_usage: Optional[int] = None, limit: Optional[int] = None):
         details = {}
         if current_usage is not None:
             details["current_usage"] = current_usage
@@ -215,7 +215,7 @@ class UsageLimitError(APIError):
             details["limit"] = limit
         super().__init__(
             error_code=ErrorCode.USAGE_LIMIT_EXCEEDED,
-            message=message,
+            detail=detail,
             status_code=403,
             details=details,
             severity=ErrorSeverity.MEDIUM
@@ -224,13 +224,13 @@ class UsageLimitError(APIError):
 class FileError(APIError):
     """파일 관련 에러"""
     
-    def __init__(self, message: str, filename: Optional[str] = None, error_code: ErrorCode = ErrorCode.FILE_UPLOAD_FAILED):
+    def __init__(self, detail: str, filename: Optional[str] = None, error_code: ErrorCode = ErrorCode.FILE_UPLOAD_FAILED):
         details = {}
         if filename:
             details["filename"] = filename
         super().__init__(
             error_code=error_code,
-            message=message,
+            detail=detail,
             status_code=400,
             details=details,
             severity=ErrorSeverity.LOW

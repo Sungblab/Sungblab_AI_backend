@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.api import deps
 from app.core.security import get_current_user
 from app.models.user import User
@@ -8,12 +8,14 @@ from app.schemas.admin import UserResponse, UserUpdate, AdminOverviewResponse
 from app.crud import crud_user, crud_admin
 from app.crud import crud_project
 from app.crud import crud_subscription
-from app.models.subscription import Subscription, SubscriptionPlan, KST, PLAN_LIMITS
+from app.models.subscription import Subscription, SubscriptionPlan, PLAN_LIMITS
+from app.core.utils import get_kr_time
 from datetime import datetime, timedelta
 from pydantic import BaseModel
-from app.core.utils import get_kr_time
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 def get_current_admin(
     current_user: User = Depends(get_current_user)
@@ -112,9 +114,7 @@ def delete_user(
         return {"message": "사용자가 삭제되었습니다."}
     except Exception as e:
         db.rollback()
-        print(f"사용자 삭제 중 오류 발생: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"사용자 삭제 중 오류 발생: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"사용자 삭제 중 오류가 발생했습니다: {str(e)}"
@@ -125,7 +125,9 @@ def get_subscriptions(
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin)
 ):
-    """모든 구독 정보를 조회합니다."""
+    """
+    모든 구독 정보를 조회합니다.
+    """
     subscriptions = db.query(Subscription).all()
     return [sub.to_dict() for sub in subscriptions]
 
@@ -141,7 +143,9 @@ def update_subscription(
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin)
 ):
-    """사용자의 구독 플랜을 변경합니다."""
+    """
+    사용자의 구독 플랜을 변경합니다.
+    """
     updated_subscription = crud_subscription.update_subscription_plan(
         db=db,
         user_id=user_id,
@@ -160,7 +164,9 @@ def reset_usage(
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin)
 ):
-    """사용자의 사용량을 초기화합니다."""
+    """
+    사용자의 사용량을 초기화합니다.
+    """
     updated_subscription = crud_subscription.reset_usage(db=db, user_id=user_id)
     if not updated_subscription:
         raise HTTPException(status_code=404, detail="구독 정보를 찾을 수 없습니다.")
@@ -196,9 +202,7 @@ def get_admin_overview(
         }
         
     except Exception as e:
-        print(f"Overview 데이터 조회 중 오류 발생: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Overview 데이터 조회 중 오류 발생: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Overview 데이터를 불러오는데 실패했습니다: {str(e)}"
@@ -209,9 +213,11 @@ def renew_expired_subscriptions(
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin)
 ):
-    """만료된 모든 구독을 갱신합니다."""
+    """
+    만료된 모든 구독을 갱신합니다.
+    """
     try:
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         
         # 만료된 구독 조회
         expired_subscriptions = db.query(Subscription).filter(
@@ -244,12 +250,35 @@ def renew_expired_subscriptions(
         }
     except Exception as e:
         db.rollback()
-        print(f"구독 갱신 중 오류 발생: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"구독 갱신 중 오류 발생: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"구독 갱신 중 오류가 발생했습니다: {str(e)}"
+        )
+
+@router.post("/subscriptions/check-expiry")
+def force_subscription_check(
+    db: Session = Depends(deps.get_db),
+    _: User = Depends(get_current_admin)
+):
+    """
+    구독 만료 체크를 강제 실행합니다. (스케줄러와 동일한 로직)
+    """
+    try:
+        from app.core.scheduled_tasks import scheduled_tasks
+        
+        # 강제로 구독 체크 실행
+        scheduled_tasks.force_subscription_check()
+        
+        return {
+            "message": "구독 만료 체크가 실행되었습니다.",
+            "status": "success"
+        }
+    except Exception as e:
+        logger.error(f"구독 만료 체크 중 오류 발생: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"구독 만료 체크 중 오류가 발생했습니다: {str(e)}"
         )
 
 # 채팅 데이터 조회 API 추가
@@ -309,7 +338,7 @@ def get_chat_messages(
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin),
     chat_type: str = "regular",  # regular, project, all
-    user_id: str = None,
+    user_id: Optional[str] = None,
     skip: int = 0,
     limit: int = 50
 ):
@@ -423,7 +452,7 @@ def get_chat_rooms(
     db: Session = Depends(deps.get_db),
     _: User = Depends(get_current_admin),
     chat_type: str = "regular",  # regular, project, all
-    user_id: str = None,
+    user_id: Optional[str] = None,
     skip: int = 0,
     limit: int = 50
 ):

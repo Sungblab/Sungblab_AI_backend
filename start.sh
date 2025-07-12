@@ -30,7 +30,7 @@ fi
 
 # 데이터베이스 초기화 (Supabase 환경)
 echo "Initializing database..."
-python -c "from app.db.init_db import init_db; init_db()" > /dev/null 2>&1
+python -c "from app.db.init_db import init_db; init_db()"
 if [ $? -eq 0 ]; then
     echo "Database initialization successful!"
 else
@@ -39,4 +39,4 @@ fi
 
 # FastAPI 애플리케이션 시작 (워커 수 줄이기)
 echo "Starting FastAPI application..."
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning > /dev/null 2>&1 
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning 

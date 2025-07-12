@@ -29,7 +29,16 @@ services:
       - CREATE_INITIAL_ADMIN=${CREATE_INITIAL_ADMIN}
       - ENVIRONMENT=development
       - DEBUG=true
-      - PYTHONOPTIMIZE=0
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
+      - REDIS_URL=${REDIS_URL}
     command: ./start.sh
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

@@ -1,6 +1,9 @@
 from typing import Optional, List, Union
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, validator
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # API 설정
@@ -26,7 +29,7 @@ class Settings(BaseSettings):
     # 시스템 모니터링 설정 (메모리 사용량 최소화)
     ENABLE_MEMORY_MANAGER: bool = False
     ENABLE_HEALTH_MONITOR: bool = True  # health API 필요하므로 유지
-    ENABLE_SCHEDULED_TASKS: bool = False
+    ENABLE_SCHEDULED_TASKS: bool = True
     ENABLE_PERFORMANCE_MONITORING: bool = False
     
     # JWT 설정
@@ -52,12 +55,10 @@ class Settings(BaseSettings):
     # CORS 설정
     BACKEND_CORS_ORIGINS_STR: Optional[str] = None
 
-    # Database (Supabase) - Optional since we're using PostgreSQL directly
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
-    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
+    # Database settings
     DATABASE_URL: str
     SQLALCHEMY_DATABASE_URL: Optional[str] = None
+    REDIS_URL: str
 
     # Google OAuth2 설정
     GOOGLE_CLIENT_ID: str
@@ -66,7 +67,7 @@ class Settings(BaseSettings):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        print(f"Environment: {self.ENVIRONMENT}")
+        logger.info(f"Environment: {self.ENVIRONMENT}")
 
     @validator("SQLALCHEMY_DATABASE_URL", pre=True)
     def assemble_db_url(cls, v: Optional[str], values: dict) -> str:
@@ -98,4 +99,50 @@ class Settings(BaseSettings):
         case_sensitive = True
         env_file = ".env"
 
-settings = Settings() 
+# Validation 설정
+class ValidationConfig:
+    """입력 검증 관련 설정"""
+    
+    # 파일 업로드 설정
+    ALLOWED_FILE_EXTENSIONS = {
+        '.txt', '.pdf', '.csv', '.md', '.docx', '.doc', 
+        '.xlsx', '.xls', '.jpg', '.jpeg', '.png', '.gif', '.webp'
+    }
+    
+    # 파일명에서 금지된 문자
+    DANGEROUS_FILENAME_CHARS = ['<', '>', ':', '"', '|', '?', '*', '\0']
+    
+    # 약한 비밀번호 패턴
+    COMMON_PASSWORD_PATTERNS = [
+        'password', '123456', 'qwerty', 'admin', 'user',
+        'test', 'guest', '000000', '111111'
+    ]
+    
+    # 파일 확장자와 MIME 타입 매핑
+    EXTENSION_MIME_MAP = {
+        '.txt': 'text/plain',
+        '.pdf': 'application/pdf',
+        '.csv': 'text/csv',
+        '.md': 'text/markdown',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.doc': 'application/msword',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xls': 'application/vnd.ms-excel',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+    
+    # 텍스트 길이 제한
+    MAX_CONTENT_LENGTH = 10000
+    MAX_DESCRIPTION_LENGTH = 2000
+    MAX_FILENAME_LENGTH = 255
+    
+    # 보안 관련 설정
+    MIN_PASSWORD_LENGTH = 8
+    MAX_PASSWORD_LENGTH = 128
+
+settings = Settings()
+validation_config = ValidationConfig() 

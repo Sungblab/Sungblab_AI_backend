@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 import string
 from typing import Optional
 from sqlalchemy.orm import Session
-from app.models.email_verification import EmailVerification, KST
-from app.core.utils import get_kr_time
+from app.models.email_verification import EmailVerification
+import secrets
 
 def generate_verification_code(length: int = 6) -> str:
     """숫자로 된 인증 코드 생성"""
@@ -16,7 +16,7 @@ def create_email_verification(db: Session, email: str) -> EmailVerification:
     db.query(EmailVerification).filter(EmailVerification.email == email).delete()
     
     # timezone-aware datetime 생성
-    expires_at = get_kr_time() + timedelta(minutes=10)  # 10분 유효
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)  # 10분 유효
     
     verification = EmailVerification(
         email=email,

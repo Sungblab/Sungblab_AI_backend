@@ -1,9 +1,10 @@
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.models.subscription import Subscription, SubscriptionPlan
-from app.core.utils import get_kr_time
-from sqlalchemy import update
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_subscription(db: Session, user_id: str) -> Optional[Subscription]:
     """사용자의 구독 정보를 조회합니다."""
@@ -26,7 +27,7 @@ def update_subscription_plan(db: Session, user_id: str, plan: SubscriptionPlan, 
     
     if update_limits:
         # 현재 시간 가져오기
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         
         # 구독이 만료되었는지 확인 (0일 이하로 남은 경우)
         is_expired = subscription.end_date and current_time >= subscription.end_date
@@ -78,7 +79,7 @@ def check_and_update_expiration(db: Session, user_id: str) -> Optional[Subscript
         if not subscription:
             return None
         
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         
         # 구독이 만료되었는지 확인
         if subscription.end_date and current_time >= subscription.end_date:
@@ -108,34 +109,64 @@ def check_and_update_expiration(db: Session, user_id: str) -> Optional[Subscript
         raise e
 
 def update_model_usage(db: Session, user_id: str, model_name: str) -> Optional[Subscription]:
-    """모델 사용량을 업데이트합니다."""
+    """모델 사용량을 원자적으로 업데이트합니다."""
     try:
-        # SELECT FOR UPDATE로 락 획득
+        # 먼저 구독 정보를 조회하여 모델 그룹 확인
         subscription = db.query(Subscription).filter(
             Subscription.user_id == user_id
-        ).with_for_update().first()
-        
+        ).first()
+
         if not subscription:
             return None
-            
-        # 사용량 증가 시도
-        if subscription.increment_usage(model_name):
-            # 변경사항을 명시적으로 플러시하여 데이터베이스에 반영
-            db.flush()
-            
-            # 다시 한번 확인하여 실제로 변경되었는지 검증
-            db.refresh(subscription)
-            
-            # 커밋
-            db.commit()
-            
-            return subscription
-        else:
-            # 사용량 증가 실패 시 롤백
-            db.rollback()
+
+        group = subscription.get_model_group(model_name)
+        if not group:
+            return None
+
+        # PostgreSQL JSON 함수를 사용한 원자적 업데이트
+        from sqlalchemy import text, func
+        
+        # JSONB의 특정 키 값을 원자적으로 증가
+        result = db.execute(
+            text("""
+                UPDATE subscriptions 
+                SET group_usage = CASE 
+                    WHEN group_usage::jsonb ? :group_key THEN
+                        jsonb_set(
+                            group_usage::jsonb, 
+                            ARRAY[:group_key], 
+                            to_jsonb((group_usage->>:group_key)::int + 1)
+                        )::json
+                    ELSE
+                        jsonb_set(
+                            COALESCE(group_usage::jsonb, '{}'::jsonb),
+                            ARRAY[:group_key],
+                            '1'::jsonb
+                        )::json
+                    END,
+                    updated_at = :updated_at
+                WHERE user_id = :user_id
+                RETURNING *
+            """),
+            {
+                'group_key': group,
+                'user_id': user_id,
+                'updated_at': datetime.now(timezone.utc)
+            }
+        )
+        
+        updated_row = result.fetchone()
+        if not updated_row:
             return None
             
+        db.commit()
+        
+        # 업데이트된 구독 정보를 다시 조회
+        return db.query(Subscription).filter(
+            Subscription.user_id == user_id
+        ).first()
+
     except Exception as e:
         db.rollback()
-        print(f"사용량 업데이트 중 오류 발생: {str(e)}")
+        logger.error(f"사용량 업데이트 중 오류 발생: {str(e)}", exc_info=True)
         raise e 
