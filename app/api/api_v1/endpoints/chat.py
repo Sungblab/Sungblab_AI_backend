@@ -37,6 +37,7 @@ from app.core.models import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # 멀티모달 모델 리스트
 MULTIMODAL_MODELS = get_multimodal_models()
@@ -84,7 +85,7 @@ async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
         
         # 파일이 Gemini API 제한을 초과하는 경우 File API 사용
         if len(contents) > GEMINI_INLINE_DATA_LIMIT:
-            print(f"Warning: File {file.filename} ({len(contents)} bytes) exceeds Gemini inline data limit. Using File API instead.")
+            logger.warning(f"File {file.filename} ({len(contents)} bytes) exceeds Gemini inline data limit. Using File API instead.")
             
             # Gemini 클라이언트 생성
             client = get_gemini_client()
@@ -110,18 +111,18 @@ async def process_file_to_base64(file: UploadFile) -> tuple[str, str]:
                     try:
                         uploaded_file = client.files.get(name=uploaded_file.name)
                     except Exception as e:
-                        print(f"Error checking file status: {e}")
+                        logger.error(f"Error checking file status: {e}", exc_info=True)
                         break
                 
                 # 처리 상태 확인
                 if uploaded_file.state.name != 'ACTIVE':
-                    print(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
+                    logger.warning(f"File {file.filename} is in state {uploaded_file.state.name}")
                 
                 # File API URI 반환 (base64 대신)
                 return f"FILE_API:{uploaded_file.name}", file.content_type
                 
             except Exception as e:
-                print(f"File API upload failed for {file.filename}: {e}")
+                logger.error(f"File API upload failed for {file.filename}: {e}", exc_info=True)
                 # 폴백: 파일 정보만 전송
                 file_info = f"파일명: {file.filename}, 크기: {len(contents)} bytes, 타입: {file.content_type} (File API 업로드 실패)"
                 base64_data = base64.b64encode(file_info.encode()).decode('utf-8')
@@ -144,7 +145,7 @@ def get_gemini_client():
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         return client
     except Exception as e:
-        print(f"Gemini client creation error: {e}")
+        logger.error(f"Gemini client creation error: {e}", exc_info=True)
         return None
 
 async def count_gemini_tokens(text: str, model: str, client) -> dict:
@@ -159,7 +160,7 @@ async def count_gemini_tokens(text: str, model: str, client) -> dict:
             "output_tokens": 0
         }
     except Exception as e:
-        print(f"Gemini token counting error: {e}")
+        logger.error(f"Gemini token counting error: {e}", exc_info=True)
         return {
             "input_tokens": len(text) // 4,  # 대략적인 토큰 계산
             "output_tokens": 0
@@ -367,7 +368,7 @@ async def generate_gemini_stream_response(
                     total_tokens += msg_token_count
                 else:
                     # 토큰 한계에 도달하면 중단
-                    print(f"Context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
+                    logger.info(f"Context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
                     break
         
         # 최소한 하나의 메시지는 포함되어야 함
@@ -382,7 +383,7 @@ async def generate_gemini_stream_response(
                 detail="No valid message content found"
             )
         
-        print(f"Context management: Using {len(valid_messages)} messages with {total_tokens} tokens")
+        logger.info(f"Context management: Using {len(valid_messages)} messages with {total_tokens} tokens")
 
         # 컨텍스트 압축 적용 (필요한 경우)
         if len(valid_messages) > 5:  # 5개 이상 메시지가 있을 때만 압축 고려
@@ -407,9 +408,9 @@ async def generate_gemini_stream_response(
                         # File API 객체로 직접 추가
                         uploaded_file = client.files.get(name=file_uri)
                         contents.append(uploaded_file)
-                        print(f"Added File API file: {file_name} ({file_uri})")
+                        logger.info(f"Added File API file: {file_name} ({file_uri})")
                     except Exception as e:
-                        print(f"Failed to get File API file {file_uri}: {e}")
+                        logger.error(f"Failed to get File API file {file_uri}: {e}", exc_info=True)
                         # 폴백: 파일 정보 텍스트로 추가
                         contents.append(f"파일: {file_name} (File API 처리 실패)")
                 else:
@@ -509,7 +510,7 @@ async def generate_gemini_stream_response(
                 # 클라이언트 연결 상태 확인
                 if await request.is_disconnected():
                     is_disconnected = True
-                    print("Client disconnected. Stopping stream.")
+                    logger.warning("Client disconnected. Stopping stream.")
                     break
                 if chunk.candidates and len(chunk.candidates) > 0:
                     candidate = chunk.candidates[0]
@@ -530,7 +531,7 @@ async def generate_gemini_stream_response(
                                         try:
                                             yield f"data: {json.dumps({'reasoning_content': buffered_content, 'thought_time': thought_time})}\n\n"
                                         except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                            print("Client disconnected during reasoning streaming")
+                                            logger.warning("Client disconnected during reasoning streaming")
                                             return
                             elif part.text:
                                 # 일반 응답 내용만 처리
@@ -542,7 +543,7 @@ async def generate_gemini_stream_response(
                                     try:
                                         yield f"data: {json.dumps({'content': buffered_content})}\n\n"
                                     except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                        print("Client disconnected during content streaming")
+                                        logger.warning("Client disconnected during content streaming")
                                         return
 
                     # 그라운딩 메타데이터 처리 (최신 API 구조)
@@ -550,23 +551,23 @@ async def generate_gemini_stream_response(
                         grounding = candidate.grounding_metadata
                         
                         # 실제 값들 확인
-                        print(f"=== GROUNDING VALUES DEBUG ===")
-                        print(f"web_search_queries: {getattr(grounding, 'web_search_queries', None)}")
-                        print(f"grounding_chunks: {getattr(grounding, 'grounding_chunks', None)}")
-                        print(f"grounding_supports: {getattr(grounding, 'grounding_supports', None)}")
+                        logger.debug("=== GROUNDING VALUES DEBUG ===")
+                        logger.debug(f"web_search_queries: {getattr(grounding, 'web_search_queries', None)}")
+                        logger.debug(f"grounding_chunks: {getattr(grounding, 'grounding_chunks', None)}")
+                        logger.debug(f"grounding_supports: {getattr(grounding, 'grounding_supports', None)}")
                         
                         # 웹 검색 쿼리 수집
                         if hasattr(grounding, 'web_search_queries') and grounding.web_search_queries:
-                            print(f"Adding web_search_queries: {grounding.web_search_queries}")
+                            logger.debug(f"Adding web_search_queries: {grounding.web_search_queries}")
                             web_search_queries.extend(grounding.web_search_queries)
                         
                         # grounding_supports에서 citations 추출 시도
                         if hasattr(grounding, 'grounding_supports') and grounding.grounding_supports:
-                            print(f"Found grounding_supports: {len(grounding.grounding_supports)} supports")
+                            logger.debug(f"Found grounding_supports: {len(grounding.grounding_supports)} supports")
                             new_citations = []
                             for i, support in enumerate(grounding.grounding_supports):
-                                print(f"Support {i}: type={type(support)}, dir={dir(support)}")
-                                print(f"Support {i} content: {support}")
+                                logger.debug(f"Support {i}: type={type(support)}, dir={dir(support)}")
+                                logger.debug(f"Support {i} content: {support}")
                                 
                                 # grounding_chunk_indices가 있는지 확인
                                 if hasattr(support, 'grounding_chunk_indices') and support.grounding_chunk_indices:
@@ -575,55 +576,55 @@ async def generate_gemini_stream_response(
                                             grounding.grounding_chunks and 
                                             chunk_idx < len(grounding.grounding_chunks)):
                                             chunk = grounding.grounding_chunks[chunk_idx]
-                                            print(f"Referenced chunk {chunk_idx}: {chunk}")
+                                            logger.debug(f"Referenced chunk {chunk_idx}: {chunk}")
                                             
                                             if hasattr(chunk, 'web') and chunk.web:
                                                 citation = {
                                                     "url": getattr(chunk.web, 'uri', ''),
                                                     "title": getattr(chunk.web, 'title', '')
                                                 }
-                                                print(f"Extracted citation from support: {citation}")
+                                                logger.debug(f"Extracted citation from support: {citation}")
                                                 if citation['url'] and not any(c['url'] == citation['url'] for c in citations):
                                                     citations.append(citation)
                                                     new_citations.append(citation)
                         
                         # 직접 grounding chunks에서도 시도
                         if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                            print(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
+                            logger.debug(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
                             new_citations = []
                             for i, chunk in enumerate(grounding.grounding_chunks):
-                                print(f"Direct chunk {i}: {chunk}")
+                                logger.debug(f"Direct chunk {i}: {chunk}")
                                 if hasattr(chunk, 'web') and chunk.web:
                                     citation = {
                                         "url": getattr(chunk.web, 'uri', ''),
                                         "title": getattr(chunk.web, 'title', '')
                                     }
-                                    print(f"Direct extracted citation: {citation}")
+                                    logger.debug(f"Direct extracted citation: {citation}")
                                     if citation['url'] and not any(c['url'] == citation['url'] for c in citations):
                                         citations.append(citation)
                                         new_citations.append(citation)
                             
                             # 새로운 인용 정보만 전송
                             if new_citations:
-                                print(f"Sending {len(new_citations)} new citations")
+                                logger.debug(f"Sending {len(new_citations)} new citations")
                                 try:
                                     yield f"data: {json.dumps({'citations': new_citations})}\n\n"
                                 except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                    print("Client disconnected during citations streaming")
+                                    logger.warning("Client disconnected during citations streaming")
                                     return
                         
                         # 검색 쿼리 전송
                         if web_search_queries:
-                            print(f"Sending search queries: {web_search_queries}")
+                            logger.debug(f"Sending search queries: {web_search_queries}")
                             try:
                                 yield f"data: {json.dumps({'search_queries': web_search_queries})}\n\n"
                             except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                print("Client disconnected during search queries streaming")
+                                logger.warning("Client disconnected during search queries streaming")
                                 return
 
             # 연결이 중단되었는지 확인
             if is_disconnected:
-                print("Skipping post-processing due to client disconnection.")
+                logger.info("Skipping post-processing due to client disconnection.")
                 return
             
             # 버퍼에 남은 내용 처리
@@ -632,7 +633,7 @@ async def generate_gemini_stream_response(
                 try:
                     yield f"data: {json.dumps({'content': remaining_content})}\n\n"
                 except (ConnectionError, BrokenPipeError, GeneratorExit):
-                    print("Client disconnected during final content flush")
+                    logger.warning("Client disconnected during final content flush")
                     return
             
             remaining_thinking = thinking_buffer.flush()
@@ -640,7 +641,7 @@ async def generate_gemini_stream_response(
                 try:
                     yield f"data: {json.dumps({'reasoning_content': remaining_thinking, 'thought_time': thought_time})}\n\n"
                 except (ConnectionError, BrokenPipeError, GeneratorExit):
-                    print("Client disconnected during final thinking flush")
+                    logger.warning("Client disconnected during final thinking flush")
                     return
             
             # 스트리밍이 정상적으로 완료됨
@@ -671,7 +672,7 @@ async def generate_gemini_stream_response(
 
         except (ConnectionError, BrokenPipeError, GeneratorExit):
             streaming_completed = False  # 클라이언트 연결 끊김 시 완료되지 않음
-            print("Client disconnected during main streaming loop")
+            logger.warning("Client disconnected during main streaming loop")
             return
         except Exception as api_error:
             streaming_completed = False  # 에러 발생 시 완료되지 않음
@@ -679,41 +680,48 @@ async def generate_gemini_stream_response(
             try:
                 yield f"data: {json.dumps({'error': error_message})}\n\n"
             except (ConnectionError, BrokenPipeError, GeneratorExit):
-                print("Client disconnected during error streaming")
+                logger.warning("Client disconnected during error streaming")
                 return
         
-        # 스트리밍이 정상적으로 완료된 경우에만 DB에 저장
+        # 스트리밍이 정상적으로 완료된 경우에만 DB에 저장 (새로운 DB 세션 사용)
         if streaming_completed and accumulated_content:
-            print(f"=== SAVING MESSAGE DEBUG ===")
-            print(f"streaming_completed: {streaming_completed}")
-            print(f"accumulated_content length: {len(accumulated_content)}")
-            print(f"citations count: {len(citations)}")
-            print(f"citations: {citations}")
-            message_create = ChatMessageCreate(
-                content=accumulated_content,
-                role="assistant",
-                room_id=room_id,
-                reasoning_content=accumulated_thinking if accumulated_thinking else None,
-                thought_time=thought_time if thought_time > 0 else None,
-                citations=citations if citations else None
-            )
-            saved_message = crud_chat.create_message(db, room_id, message_create)
-            print(f"Message saved with ID: {saved_message.id}")
-            print(f"Saved message citations: {saved_message.citations}")
-            print(f"=== END SAVING DEBUG ===")
+            logger.debug("=== SAVING MESSAGE DEBUG ===")
+            logger.debug(f"streaming_completed: {streaming_completed}")
+            logger.debug(f"accumulated_content length: {len(accumulated_content)}")
+            logger.debug(f"citations count: {len(citations)}")
+            logger.debug(f"citations: {citations}")
+            
+            # 새로운 DB 세션으로 저장 (기존 세션과 분리)
+            from app.db.session import SessionLocal
+            new_db = SessionLocal()
+            try:
+                message_create = ChatMessageCreate(
+                    content=accumulated_content,
+                    role="assistant",
+                    room_id=room_id,
+                    reasoning_content=accumulated_thinking if accumulated_thinking else None,
+                    thought_time=thought_time if thought_time > 0 else None,
+                    citations=citations if citations else None
+                )
+                saved_message = crud_chat.create_message(new_db, room_id, message_create)
+                logger.info(f"Message saved with ID: {saved_message.id}")
+                logger.debug(f"Saved message citations: {saved_message.citations}")
+                logger.debug("=== END SAVING DEBUG ===")
+            finally:
+                new_db.close()
         else:
-            print(f"=== MESSAGE NOT SAVED ===")
-            print(f"streaming_completed: {streaming_completed}")
-            print(f"accumulated_content: {bool(accumulated_content)}")
-            print(f"Reason: {'Streaming was interrupted' if not streaming_completed else 'No content'}")
-            print(f"=== END NOT SAVED DEBUG ===")
+            logger.info("=== MESSAGE NOT SAVED ===")
+            logger.info(f"streaming_completed: {streaming_completed}")
+            logger.info(f"accumulated_content: {bool(accumulated_content)}")
+            logger.info(f"Reason: {'Streaming was interrupted' if not streaming_completed else 'No content'}")
+            logger.info("=== END NOT SAVED DEBUG ===")
 
     except Exception as e:
         error_message = f"Stream Generation Error: {str(e)}"
         try:
             yield f"data: {json.dumps({'error': error_message})}\n\n"
         except (ConnectionError, BrokenPipeError, GeneratorExit):
-            print("Client disconnected during final error streaming (generate_gemini_stream_response)")
+            logger.warning("Client disconnected during final error streaming (generate_gemini_stream_response)")
             return
 
 async def generate_stream_response(
@@ -797,7 +805,7 @@ async def generate_stream_response(
         try:
             yield f"data: {json.dumps({'error': error_message})}\n\n"
         except (ConnectionError, BrokenPipeError, GeneratorExit):
-            print("Client disconnected during final error streaming (generate_stream_response)")
+            logger.warning("Client disconnected during final error streaming (generate_stream_response)")
             return
 
 async def validate_file(file: UploadFile) -> bool:
@@ -823,6 +831,178 @@ async def validate_file(file: UploadFile) -> bool:
     
     return False
 
+async def generate_chat_room_name(first_message: str) -> str:
+    """Open-WebUI 스타일의 AI 기반 채팅방 제목 생성"""
+    try:
+        # 빈 메시지 처리
+        if not first_message or len(first_message.strip()) == 0:
+            return "새 채팅"
+        
+        # 간단한 fallback 먼저 생성 (AI 실패 시 사용)
+        words = first_message.strip().split()
+        fallback_title = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
+        if len(fallback_title) > 20:
+            fallback_title = fallback_title[:17] + "..."
+        
+        # Gemini 클라이언트 확인
+        client = get_gemini_client()
+        if not client:
+            logger.warning("Gemini client not available, using fallback")
+            return fallback_title
+        
+        # 개선된 프롬프트 템플릿
+        prompt_template = """사용자 메시지를 분석해서 대화 주제를 나타내는 간결한 한국어 제목을 만드세요.
+
+규칙:
+- 3-5단어 + 이모지 1개
+- 대화 주제나 질문 내용을 요약
+- 단순한 인사말("안녕", "하이", "헬로", "hi" 등)은 반드시 "💬 일반 대화"로 처리
+- 의미있는 내용이 있을 때만 구체적인 제목 생성
+- JSON 형식으로만 응답
+
+예시:
+{{"title": "📚 파이썬 학습 질문"}}
+{{"title": "🍕 요리 레시피 문의"}}
+{{"title": "💻 프로그래밍 도움"}}
+{{"title": "💬 일반 대화"}}
+
+특별 처리:
+- "안녕", "하이", "헬로", "hi", "hello" 등 → {{"title": "💬 일반 대화"}}
+- 단순 인사 이외의 의미있는 내용 → 구체적인 제목 생성
+
+사용자 메시지: {message}
+
+JSON 응답:"""
+
+        # 메시지 길이 제한 (토큰 절약)
+        limited_message = first_message[:200] if len(first_message) > 200 else first_message
+        
+        # 프롬프트 생성
+        prompt = prompt_template.format(message=limited_message)
+        
+        logger.info(f"Generating AI title for message: '{limited_message[:50]}...'")
+        
+        # Gemini API 호출
+        logger.info(f"Final prompt being sent to Gemini: {repr(prompt)}")
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.1,  # 일관된 결과를 위해 낮은 온도
+                    max_output_tokens=100  # JSON 응답용
+                )
+            )
+            logger.info(f"Gemini raw response: {repr(response.text)}")
+            
+            # JSON 응답 파싱 (마크다운 코드 블록 제거)
+            if hasattr(response, 'text') and response.text:
+                import json
+                import re
+                try:
+                    # 마크다운 코드 블록 제거 (```json ... ``` 형태)
+                    text = response.text.strip()
+                    if text.startswith('```'):
+                        # 코드 블록에서 JSON 부분만 추출
+                        json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+                        if json_match:
+                            text = json_match.group(1).strip()
+                    
+                    result = json.loads(text)
+                    if 'title' in result and result['title']:
+                        ai_title = result['title'].strip()
+                        # 길이 제한 확인
+                        if len(ai_title) <= 25:
+                            logger.info(f"✓ AI generated title: '{ai_title}'")
+                            return ai_title
+                        else:
+                            logger.warning(f"AI title too long: '{ai_title}', using fallback")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON response: {e}, response: '{response.text}'")
+            
+            # candidates 구조 시도 (마크다운 코드 블록 제거)
+            if hasattr(response, 'candidates') and response.candidates:
+                for candidate in response.candidates:
+                    if hasattr(candidate, 'content') and candidate.content:
+                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                            for part in candidate.content.parts:
+                                if hasattr(part, 'text') and part.text:
+                                    try:
+                                        import json
+                                        import re
+                                        # 마크다운 코드 블록 제거
+                                        text = part.text.strip()
+                                        if text.startswith('```'):
+                                            json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+                                            if json_match:
+                                                text = json_match.group(1).strip()
+                                        
+                                        result = json.loads(text)
+                                        if 'title' in result and result['title']:
+                                            ai_title = result['title'].strip()
+                                            if len(ai_title) <= 25:
+                                                logger.info(f"✓ AI generated title from candidates: '{ai_title}'")
+                                                return ai_title
+                                    except json.JSONDecodeError:
+                                        continue
+            
+        except Exception as api_error:
+            logger.warning(f"Gemini API call failed: {api_error}")
+        
+        # AI 생성 실패 시 fallback 사용
+        logger.info(f"Using fallback title: '{fallback_title}'")
+        return fallback_title
+        
+            
+    except Exception as e:
+        logger.error(f"Chat room name generation error: {e}", exc_info=True)
+        return "새 채팅"
+
+@router.post("/title/generate", summary="채팅방 제목 생성")
+async def generate_title_api(
+    request: Request
+):
+    """Open-WebUI 스타일 채팅방 제목 생성 API"""
+    try:
+        body = await request.json()
+        messages = body.get("messages", [])
+        
+        if not messages:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one message is required"
+            )
+        
+        # 첫 번째 user 메시지 찾기
+        first_user_message = None
+        for msg in messages:
+            if msg.get("role") == "user" and msg.get("content"):
+                first_user_message = msg.get("content")
+                break
+        
+        if not first_user_message:
+            raise HTTPException(
+                status_code=400,
+                detail="No user message found"
+            )
+        
+        # 제목 생성
+        title = await generate_chat_room_name(first_user_message)
+        
+        return {
+            "title": title,
+            "status": "success"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Title generation API error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error during title generation"
+        )
+
 @router.post("/rooms", response_model=ChatRoom, summary="새 채팅방 생성")
 def create_chat_room(
     room: ChatRoomCreate,
@@ -846,6 +1026,43 @@ def create_chat_room(
     - 생성된 채팅방 정보 반환
     """
     return crud_chat.create_chat_room(db, room, current_user.id)
+
+@router.post("/rooms/{room_id}/generate-name")
+async def generate_room_name(
+    room_id: str,
+    message_content: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """첫 번째 메시지를 기반으로 채팅방 이름을 생성하고 업데이트합니다."""
+    try:
+        # 채팅방 소유권 확인
+        chat_room = crud_chat.get_chat_room(db, room_id, current_user.id)
+        if not chat_room:
+            raise HTTPException(status_code=404, detail="Chat room not found")
+        
+        # 채팅방 이름 생성
+        generated_name = await generate_chat_room_name(message_content)
+        
+        # 채팅방 이름 업데이트
+        from app.schemas.chat import ChatRoomCreate
+        room_update = ChatRoomCreate(
+            name=generated_name
+        )
+        
+        updated_room = crud_chat.update_chat_room(db, room_id, room_update, current_user.id)
+        
+        return {
+            "room_id": room_id,
+            "generated_name": generated_name,
+            "updated_room": updated_room
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Room name generation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate room name")
 
 @router.get("/rooms", response_model=ChatRoomList)
 async def get_chatroom(
@@ -1376,7 +1593,7 @@ async def search_web(
                     # 클라이언트 연결 상태 확인
                     if await request.is_disconnected():
                         is_disconnected = True
-                        print("Client disconnected during search. Stopping stream.")
+                        logger.warning("Client disconnected during search. Stopping stream.")
                         break
                     if chunk.candidates and len(chunk.candidates) > 0:
                         candidate = chunk.candidates[0]
@@ -1389,7 +1606,7 @@ async def search_web(
                                     try:
                                         yield f"data: {json.dumps({'content': part.text})}\n\n"
                                     except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                        print("Client disconnected during search content streaming")
+                                        logger.warning("Client disconnected during search content streaming")
                                         return
                         
                         # 그라운딩 메타데이터 처리 (최신 API 구조)
@@ -1397,23 +1614,23 @@ async def search_web(
                             grounding = candidate.grounding_metadata
                             
                             # 디버깅: grounding metadata 구조 확인 (검색용)
-                            print(f"=== SEARCH GROUNDING METADATA DEBUG ===")
-                            print(f"grounding type: {type(grounding)}")
-                            print(f"grounding dir: {dir(grounding)}")
+                            logger.debug("=== SEARCH GROUNDING METADATA DEBUG ===")
+                            logger.debug(f"grounding type: {type(grounding)}")
+                            logger.debug(f"grounding dir: {dir(grounding)}")
                             
                             # 웹 검색 쿼리 수집
                             if hasattr(grounding, 'web_search_queries') and grounding.web_search_queries:
-                                print(f"Found web_search_queries: {grounding.web_search_queries}")
+                                logger.debug(f"Found web_search_queries: {grounding.web_search_queries}")
                                 web_search_queries.extend(grounding.web_search_queries)
                             
                             # grounding chunks에서 citations 추출
                             if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                                print(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
+                                logger.debug(f"Found grounding_chunks: {len(grounding.grounding_chunks)} chunks")
                                 new_citations = []
                                 for i, chunk in enumerate(grounding.grounding_chunks):
-                                    print(f"Search Chunk {i}: type={type(chunk)}, dir={dir(chunk)}")
+                                    logger.debug(f"Search Chunk {i}: type={type(chunk)}, dir={dir(chunk)}")
                                     if hasattr(chunk, 'web') and chunk.web:
-                                        print(f"Search Chunk {i} web: type={type(chunk.web)}, dir={dir(chunk.web)}")
+                                        logger.debug(f"Search Chunk {i} web: type={type(chunk.web)}, dir={dir(chunk.web)}")
                                         citation_url = chunk.web.uri
                                         
                                         # Mixed Content 문제 방지: HTTP URL을 HTTPS로 변환
@@ -1426,23 +1643,23 @@ async def search_web(
                                                 "url": citation_url,
                                                 "title": chunk.web.title if hasattr(chunk.web, 'title') else ""
                                             }
-                                            print(f"Search extracted citation: {citation}")
+                                            logger.debug(f"Search extracted citation: {citation}")
                                             citations.append(citation)
                                             new_citations.append(citation)
                                             citations_sent.add(citation_url)
                                 
                                 # 새로운 인용 정보만 전송
                                 if new_citations:
-                                    print(f"Search sending {len(new_citations)} new citations")
+                                    logger.debug(f"Search sending {len(new_citations)} new citations")
                                     try:
                                         yield f"data: {json.dumps({'citations': new_citations})}\n\n"
                                     except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                        print("Client disconnected during search citations streaming")
+                                        logger.warning("Client disconnected during search citations streaming")
                                         return
                 
                 # 연결이 중단되었는지 확인
                 if is_disconnected:
-                    print("Skipping search post-processing due to client disconnection.")
+                    logger.info("Skipping search post-processing due to client disconnection.")
                     return
                 
                 # 검색이 정상적으로 완료됨
@@ -1453,7 +1670,7 @@ async def search_web(
                     try:
                         yield f"data: {json.dumps({'search_queries': web_search_queries})}\n\n"
                     except (ConnectionError, BrokenPipeError, GeneratorExit):
-                        print("Client disconnected during final search queries streaming")
+                        logger.warning("Client disconnected during final search queries streaming")
                         return
                 
             except Exception as e:
@@ -1461,14 +1678,14 @@ async def search_web(
                 try:
                     yield f"data: {json.dumps({'error': f'Search failed: {str(e)}'})}\n\n"
                 except (ConnectionError, BrokenPipeError, GeneratorExit):
-                    print("Client disconnected during search error streaming")
+                    logger.warning("Client disconnected during search error streaming")
                     return
             
             # 검색이 정상적으로 완료된 경우에만 DB에 저장
             if search_completed and accumulated_content:
-                print(f"=== SEARCH SAVING DEBUG ===")
-                print(f"search_completed: {search_completed}")
-                print(f"Saving search response with {len(citations)} citations: {citations}")
+                logger.debug("=== SEARCH SAVING DEBUG ===")
+                logger.debug(f"search_completed: {search_completed}")
+                logger.debug(f"Saving search response with {len(citations)} citations: {citations}")
                 ai_message = ChatMessageCreate(
                     content=accumulated_content,
                     role="assistant",
@@ -1476,14 +1693,14 @@ async def search_web(
                     citations=citations if citations else None
                 )
                 saved_message = crud_chat.create_message(db, room_id, ai_message)
-                print(f"Saved message citations: {saved_message.citations}")
-                print(f"=== END SEARCH SAVING DEBUG ===")
+                logger.debug(f"Saved message citations: {saved_message.citations}")
+                logger.debug("=== END SEARCH SAVING DEBUG ===")
             else:
-                print(f"=== SEARCH MESSAGE NOT SAVED ===")
-                print(f"search_completed: {search_completed}")
-                print(f"accumulated_content: {bool(accumulated_content)}")
-                print(f"Reason: {'Search was interrupted' if not search_completed else 'No content'}")
-                print(f"=== END SEARCH NOT SAVED DEBUG ===")
+                logger.info("=== SEARCH MESSAGE NOT SAVED ===")
+                logger.info(f"search_completed: {search_completed}")
+                logger.info(f"accumulated_content: {bool(accumulated_content)}")
+                logger.info(f"Reason: {'Search was interrupted' if not search_completed else 'No content'}")
+                logger.info("=== END SEARCH NOT SAVED DEBUG ===")
         
         return StreamingResponse(
             generate_search_stream(),
@@ -1555,7 +1772,7 @@ async def get_or_create_chat_session(
         
         return chat_session
     except Exception as e:
-        print(f"Chat session creation error: {e}")
+        logger.error(f"Chat session creation error: {e}", exc_info=True)
         return None
 
 async def compress_context_if_needed(
@@ -1575,7 +1792,7 @@ async def compress_context_if_needed(
     if total_tokens < max_tokens * CONTEXT_COMPRESSION_THRESHOLD:
         return messages
     
-    print(f"Context compression needed: {total_tokens} tokens > {max_tokens * CONTEXT_COMPRESSION_THRESHOLD}")
+    logger.info(f"Context compression needed: {total_tokens} tokens > {max_tokens * CONTEXT_COMPRESSION_THRESHOLD}")
     
     # 최신 메시지는 유지하고 오래된 메시지들을 요약
     keep_recent = 3  # 최근 3개 메시지 유지
@@ -1607,11 +1824,11 @@ async def compress_context_if_needed(
             {"role": "system", "content": f"이전 대화 요약: {summary_response.text}"}
         ] + recent_messages
         
-        print(f"Context compressed: {len(messages)} -> {len(compressed_messages)} messages")
+        logger.info(f"Context compressed: {len(messages)} -> {len(compressed_messages)} messages")
         return compressed_messages
         
     except Exception as e:
-        print(f"Context compression error: {e}")
+        logger.error(f"Context compression error: {e}", exc_info=True)
         return messages[-keep_recent:]  # 실패시 최근 메시지만 유지
 
 class StreamingBuffer:
@@ -1737,7 +1954,7 @@ async def generate_anonymous_gemini_stream_response(
         for chunk in response:
             # 클라이언트 연결 상태 확인
             if await request.is_disconnected():
-                print("Anonymous client disconnected. Stopping stream.")
+                logger.warning("Anonymous client disconnected. Stopping stream.")
                 break
                 
             if chunk.candidates and len(chunk.candidates) > 0:
@@ -1750,7 +1967,7 @@ async def generate_anonymous_gemini_stream_response(
                             try:
                                 yield f"data: {json.dumps({'content': part.text})}\n\n"
                             except (ConnectionError, BrokenPipeError, GeneratorExit):
-                                print("Anonymous client disconnected during streaming")
+                                logger.warning("Anonymous client disconnected during streaming")
                                 return
         
         # 사용량 증가 (성공적으로 응답이 완료된 경우에만)
@@ -1758,7 +1975,7 @@ async def generate_anonymous_gemini_stream_response(
             crud_anonymous_usage.increment_usage(db, session_id, ip_address)
             
     except Exception as e:
-        print(f"Anonymous chat error: {e}")
+        logger.error(f"Anonymous chat error: {e}", exc_info=True)
         yield f"data: {json.dumps({'error': '죄송합니다. 일시적인 오류가 발생했습니다.'})}\n\n"
 
 
@@ -1833,7 +2050,7 @@ async def anonymous_chat(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Anonymous chat error: {e}")
+        logger.error(f"Anonymous chat error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
 
 
@@ -1866,7 +2083,7 @@ async def get_anonymous_usage(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Anonymous usage check error: {e}")
+        logger.error(f"Anonymous usage check error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="사용량 조회 중 오류가 발생했습니다.")
 
 
@@ -1886,7 +2103,7 @@ async def create_anonymous_session(request: Request):
         }
         
     except Exception as e:
-        print(f"Anonymous session creation error: {e}")
+        logger.error(f"Anonymous session creation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="세션 생성 중 오류가 발생했습니다.")
 
 
@@ -1912,5 +2129,5 @@ async def get_anonymous_stats(
         return stats
         
     except Exception as e:
-        print(f"Anonymous stats error: {e}")
+        logger.error(f"Anonymous stats error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="통계 조회 중 오류가 발생했습니다.")

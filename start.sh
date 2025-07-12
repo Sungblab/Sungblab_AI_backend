@@ -28,9 +28,30 @@ if [ $counter -eq $max_retries ]; then
     exit 1
 fi
 
+# Redis 연결 대기
+echo "Waiting for Redis..."
+redis_counter=0
+redis_max_retries=30
+
+while [ $redis_counter -lt $redis_max_retries ]
+do
+    if redis-cli -h redis -p 6379 ping > /dev/null 2>&1; then
+        echo "Redis is ready!"
+        break
+    fi
+    echo "Waiting for Redis... Attempt $((redis_counter+1))/$redis_max_retries"
+    redis_counter=$((redis_counter+1))
+    sleep 2
+done
+
+if [ $redis_counter -eq $redis_max_retries ]; then
+    echo "Could not connect to Redis after $redis_max_retries attempts"
+    echo "Starting without Redis caching..."
+fi
+
 # 데이터베이스 초기화 (Supabase 환경)
 echo "Initializing database..."
-python -c "from app.db.init_db import init_db; init_db()" > /dev/null 2>&1
+python -c "from app.db.init_db import init_db; init_db()"
 if [ $? -eq 0 ]; then
     echo "Database initialization successful!"
 else
@@ -39,4 +60,4 @@ fi
 
 # FastAPI 애플리케이션 시작 (워커 수 줄이기)
 echo "Starting FastAPI application..."
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning > /dev/null 2>&1 
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning 

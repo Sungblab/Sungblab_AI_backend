@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, func, Index
+from sqlalchemy import Column, Integer, String, Index
 from app.db.base_class import Base
 
 
@@ -10,8 +10,6 @@ class AnonymousUsage(Base):
     session_id = Column(String(255), nullable=False, index=True)
     ip_address = Column(String(45), nullable=False, index=True)
     usage_count = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # 복합 인덱스 (세션 ID + IP 주소)
     __table_args__ = (

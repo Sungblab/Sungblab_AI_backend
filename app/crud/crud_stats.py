@@ -1,13 +1,16 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, text
 from app.models.stats import TokenUsage
 from app.models.project import ProjectChat, ProjectMessage
 from app.models.chat_room import ChatRoom
 from app.models.chat import ChatMessage
 from app.models.user import User
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_token_usage(
     db: Session,
@@ -17,7 +20,7 @@ def create_token_usage(
     model: str,
     input_tokens: int,
     output_tokens: int,
-    timestamp: datetime,
+    timestamp: datetime = datetime.now(timezone.utc),
     chat_type: Optional[str] = None,
     cache_write_tokens: int = 0,
     cache_hit_tokens: int = 0
@@ -77,10 +80,10 @@ def get_token_usage_history(
     """토큰 사용 기록을 시간순으로 가져옵니다."""
     
     # 디버깅 로그 추가
-    print(f"[DEBUG] get_token_usage_history 호출됨:")
-    print(f"  - start: {start}")
-    print(f"  - end: {end}")
-    print(f"  - user_id: {user_id}")
+    logger.debug(f"get_token_usage_history 호출됨:")
+    logger.debug(f"  - start: {start}")
+    logger.debug(f"  - end: {end}")
+    logger.debug(f"  - user_id: {user_id}")
     
     query = db.query(
         TokenUsage.timestamp,
@@ -98,15 +101,15 @@ def get_token_usage_history(
     # 날짜 필터링을 선택적으로 적용
     if start is not None and end is not None:
         query = query.filter(TokenUsage.timestamp.between(start, end))
-        print(f"[DEBUG] 날짜 필터링 적용: {start} ~ {end}")
+        logger.debug(f"날짜 필터링 적용: {start} ~ {end}")
     elif start is not None:
         query = query.filter(TokenUsage.timestamp >= start)
-        print(f"[DEBUG] 시작 날짜 필터링 적용: >= {start}")
+        logger.debug(f"시작 날짜 필터링 적용: >= {start}")
     elif end is not None:
         query = query.filter(TokenUsage.timestamp <= end)
-        print(f"[DEBUG] 종료 날짜 필터링 적용: <= {end}")
+        logger.debug(f"종료 날짜 필터링 적용: <= {end}")
     else:
-        print(f"[DEBUG] 날짜 필터링 없음 - 전체 데이터 조회")
+        logger.debug(f"날짜 필터링 없음 - 전체 데이터 조회")
 
     if user_id:
         query = query.filter(TokenUsage.user_id == user_id)
@@ -116,13 +119,13 @@ def get_token_usage_history(
 
     results = query.all()
     
-    print(f"[DEBUG] 조회 결과: {len(results)}개 레코드")
+    logger.debug(f"조회 결과: {len(results)}개 레코드")
     
     # 처음 5개 레코드의 timestamp 출력
     if results:
-        print(f"[DEBUG] 처음 5개 레코드 timestamp:")
+        logger.debug(f"처음 5개 레코드 timestamp:")
         for i, usage in enumerate(results[:5]):
-            print(f"  {i+1}. {usage.timestamp}")
+            logger.debug(f"  {i+1}. {usage.timestamp}")
     
     return [
         {
@@ -145,300 +148,202 @@ def get_chat_statistics(
     end_date: Optional[datetime],
     user_id: Optional[str] = None
 ) -> Dict:
-    """채팅 사용량 통계를 조회합니다."""
+    """채팅 사용량 통계를 최적화된 단일 쿼리로 조회합니다."""
     
     try:
-        # 사용자 정보 조회
-        users = {
-            str(user.id): {"email": user.email, "name": user.full_name or user.email.split('@')[0]}
-            for user in db.query(User).all()
-        }
-
-        # 채팅방 수 쿼리 - 날짜 필터링을 선택적으로 적용
-        project_chat_query = db.query(func.count(ProjectChat.id))
-        chat_room_query = db.query(func.count(ChatRoom.id))
+        # 날짜 필터 조건 구성
+        date_filter = []
+        if start_date and end_date:
+            date_filter.append("created_at BETWEEN :start_date AND :end_date")
+        elif start_date:
+            date_filter.append("created_at >= :start_date")
+        elif end_date:
+            date_filter.append("created_at <= :end_date")
         
-        # 날짜 필터링 적용 - start_date와 end_date가 모두 있을 때만 적용
-        if start_date is not None and end_date is not None:
-            project_chat_query = project_chat_query.filter(ProjectChat.created_at.between(start_date, end_date))
-            chat_room_query = chat_room_query.filter(ChatRoom.created_at.between(start_date, end_date))
-        elif start_date is not None:
-            project_chat_query = project_chat_query.filter(ProjectChat.created_at >= start_date)
-            chat_room_query = chat_room_query.filter(ChatRoom.created_at >= start_date)
-        elif end_date is not None:
-            project_chat_query = project_chat_query.filter(ProjectChat.created_at <= end_date)
-            chat_room_query = chat_room_query.filter(ChatRoom.created_at <= end_date)
-        # 날짜 필터링이 없으면 모든 데이터 조회
+        date_condition = f"WHERE {' AND '.join(date_filter)}" if date_filter else ""
+        user_condition = "AND user_id = :user_id" if user_id else ""
         
+        # 파라미터 준비
+        params = {}
+        if start_date:
+            params['start_date'] = start_date
+        if end_date:
+            params['end_date'] = end_date
         if user_id:
-            project_chat_query = project_chat_query.filter(ProjectChat.user_id == user_id)
-            chat_room_query = chat_room_query.filter(ChatRoom.user_id == user_id)
-        
-        project_chat_count = project_chat_query.scalar() or 0
-        chat_room_count = chat_room_query.scalar() or 0
-        total_chats = project_chat_count + chat_room_count
+            params['user_id'] = user_id
 
-        # 메시지 수 쿼리 - 날짜 필터링을 선택적으로 적용
-        message_query = db.query(func.count(ChatMessage.id))
-        project_message_query = db.query(func.count(ProjectMessage.id))
-        
-        # 날짜 필터링 적용 - start_date와 end_date가 모두 있을 때만 적용
-        if start_date is not None and end_date is not None:
-            message_query = message_query.filter(ChatMessage.created_at.between(start_date, end_date))
-            project_message_query = project_message_query.filter(ProjectMessage.created_at.between(start_date, end_date))
-        elif start_date is not None:
-            message_query = message_query.filter(ChatMessage.created_at >= start_date)
-            project_message_query = project_message_query.filter(ProjectMessage.created_at >= start_date)
-        elif end_date is not None:
-            message_query = message_query.filter(ChatMessage.created_at <= end_date)
-            project_message_query = project_message_query.filter(ProjectMessage.created_at <= end_date)
-        # 날짜 필터링이 없으면 모든 데이터 조회
-        
-        if user_id:
-            message_query = message_query.join(
-                ChatRoom, ChatMessage.room_id == ChatRoom.id
-            ).filter(ChatRoom.user_id == user_id)
+        # 단일 통합 쿼리로 모든 통계 조회
+        query = text(f"""
+        WITH 
+        -- 사용자 정보
+        users AS (
+            SELECT id, email, COALESCE(full_name, SPLIT_PART(email, '@', 1)) as name
+            FROM users
+        ),
+        -- 채팅방 통계
+        chat_stats AS (
+            SELECT 
+                user_id,
+                COUNT(*) as chat_count,
+                0 as project_count,
+                0 as message_count,
+                'chat' as type
+            FROM chatroom 
+            {date_condition.replace('created_at', 'chatroom.created_at')} {user_condition.replace('user_id', 'chatroom.user_id')}
+            GROUP BY user_id
             
-            project_message_query = project_message_query.join(
-                ProjectChat, ProjectMessage.room_id == ProjectChat.id
-            ).filter(ProjectChat.user_id == user_id)
-        
-        message_count = message_query.scalar() or 0
-        project_message_count = project_message_query.scalar() or 0
-        total_messages = message_count + project_message_count
-
-        # 사용자별 채팅방 수 쿼리 - 날짜 필터링 적용
-        user_chat_stats_query = db.query(
-            ChatRoom.user_id,
-            func.count(ChatRoom.id).label('chat_count')
+            UNION ALL
+            
+            SELECT 
+                user_id,
+                0 as chat_count,
+                COUNT(*) as project_count,
+                0 as message_count,
+                'project' as type
+            FROM projectchat 
+            {date_condition.replace('created_at', 'projectchat.created_at')} {user_condition.replace('user_id', 'projectchat.user_id')}
+            GROUP BY user_id
+        ),
+        -- 메시지 통계
+        message_stats AS (
+            SELECT 
+                cr.user_id,
+                0 as chat_count,
+                0 as project_count,
+                COUNT(*) as message_count,
+                'chat_message' as type
+            FROM chat_messages cm
+            JOIN chatroom cr ON cm.room_id = cr.id
+            {date_condition.replace('created_at', 'cm.created_at')} {user_condition.replace('user_id', 'cr.user_id')}
+            GROUP BY cr.user_id
+            
+            UNION ALL
+            
+            SELECT 
+                pc.user_id,
+                0 as chat_count,
+                0 as project_count,
+                COUNT(*) as message_count,
+                'project_message' as type
+            FROM project_messages pm
+            JOIN projectchat pc ON pm.room_id = pc.id
+            {date_condition.replace('created_at', 'pm.created_at')} {user_condition.replace('user_id', 'pc.user_id')}
+            GROUP BY pc.user_id
+        ),
+        -- 토큰 사용량 통계 (사용자별로 집계)
+        token_stats AS (
+            SELECT 
+                user_id,
+                SUM(input_tokens) as total_input_tokens,
+                SUM(output_tokens) as total_output_tokens,
+                SUM(cache_write_tokens) as total_cache_write_tokens,
+                SUM(cache_hit_tokens) as total_cache_hit_tokens
+            FROM token_usage 
+            {date_condition.replace('created_at', 'timestamp')} {user_condition}
+            GROUP BY user_id
+        ),
+        -- 전체 통계 집계
+        aggregated_stats AS (
+            SELECT 
+                user_id,
+                SUM(chat_count) as total_chat_count,
+                SUM(project_count) as total_project_count,
+                SUM(message_count) as total_message_count
+            FROM (
+                SELECT * FROM chat_stats
+                UNION ALL
+                SELECT * FROM message_stats
+            ) combined
+            GROUP BY user_id
+        ),
+        -- 사용자별 집계된 데이터
+        user_aggregated AS (
+            SELECT 
+                u.id as user_id,
+                u.email,
+                u.name,
+                COALESCE(a.total_chat_count, 0) as chat_count,
+                COALESCE(a.total_project_count, 0) as project_count,
+                COALESCE(a.total_message_count, 0) as message_count,
+                COALESCE(t.total_input_tokens, 0) as input_tokens,
+                COALESCE(t.total_output_tokens, 0) as output_tokens,
+                COALESCE(t.total_cache_write_tokens, 0) as cache_write_tokens,
+                COALESCE(t.total_cache_hit_tokens, 0) as cache_hit_tokens
+            FROM users u
+            LEFT JOIN aggregated_stats a ON u.id = a.user_id
+            LEFT JOIN token_stats t ON u.id = t.user_id
+            {'WHERE u.id = :user_id' if user_id else ''}
         )
-        if start_date is not None and end_date is not None:
-            user_chat_stats_query = user_chat_stats_query.filter(ChatRoom.created_at.between(start_date, end_date))
-        elif start_date is not None:
-            user_chat_stats_query = user_chat_stats_query.filter(ChatRoom.created_at >= start_date)
-        elif end_date is not None:
-            user_chat_stats_query = user_chat_stats_query.filter(ChatRoom.created_at <= end_date)
-        user_chat_stats = user_chat_stats_query.group_by(ChatRoom.user_id).all()
-
-        user_project_stats_query = db.query(
-            ProjectChat.user_id,
-            func.count(ProjectChat.id).label('project_count')
-        )
-        if start_date is not None and end_date is not None:
-            user_project_stats_query = user_project_stats_query.filter(ProjectChat.created_at.between(start_date, end_date))
-        elif start_date is not None:
-            user_project_stats_query = user_project_stats_query.filter(ProjectChat.created_at >= start_date)
-        elif end_date is not None:
-            user_project_stats_query = user_project_stats_query.filter(ProjectChat.created_at <= end_date)
-        user_project_stats = user_project_stats_query.group_by(ProjectChat.user_id).all()
-
-        # 사용자별 메시지 수 쿼리 - 날짜 필터링 적용
-        user_message_stats_query = db.query(
-            ChatRoom.user_id,
-            func.count(ChatMessage.id).label('message_count')
-        ).join(
-            ChatMessage, ChatMessage.room_id == ChatRoom.id
-        )
-        if start_date is not None and end_date is not None:
-            user_message_stats_query = user_message_stats_query.filter(ChatMessage.created_at.between(start_date, end_date))
-        elif start_date is not None:
-            user_message_stats_query = user_message_stats_query.filter(ChatMessage.created_at >= start_date)
-        elif end_date is not None:
-            user_message_stats_query = user_message_stats_query.filter(ChatMessage.created_at <= end_date)
-        user_message_stats = user_message_stats_query.group_by(ChatRoom.user_id).all()
-
-        user_project_message_stats_query = db.query(
-            ProjectChat.user_id,
-            func.count(ProjectMessage.id).label('message_count')
-        ).join(
-            ProjectMessage, ProjectMessage.room_id == ProjectChat.id
-        )
-        if start_date is not None and end_date is not None:
-            user_project_message_stats_query = user_project_message_stats_query.filter(ProjectMessage.created_at.between(start_date, end_date))
-        elif start_date is not None:
-            user_project_message_stats_query = user_project_message_stats_query.filter(ProjectMessage.created_at >= start_date)
-        elif end_date is not None:
-            user_project_message_stats_query = user_project_message_stats_query.filter(ProjectMessage.created_at <= end_date)
-        user_project_message_stats = user_project_message_stats_query.group_by(ProjectChat.user_id).all()
-
-        # 사용자별 토큰 사용량 쿼리 - 날짜 필터링을 선택적으로 적용
-        user_token_stats = db.query(
-            TokenUsage.user_id,
-            func.sum(TokenUsage.input_tokens).label('total_input_tokens'),
-            func.sum(TokenUsage.output_tokens).label('total_output_tokens'),
-            func.sum(TokenUsage.cache_write_tokens).label('total_cache_write_tokens'),
-            func.sum(TokenUsage.cache_hit_tokens).label('total_cache_hit_tokens'),
-            TokenUsage.chat_type
-        )
         
-        # 날짜 필터링 적용 - start_date와 end_date가 모두 있을 때만 적용
-        if start_date is not None and end_date is not None:
-            user_token_stats = user_token_stats.filter(TokenUsage.timestamp.between(start_date, end_date))
-        elif start_date is not None:
-            user_token_stats = user_token_stats.filter(TokenUsage.timestamp >= start_date)
-        elif end_date is not None:
-            user_token_stats = user_token_stats.filter(TokenUsage.timestamp <= end_date)
-        # 날짜 필터링이 없으면 모든 데이터 조회
+        SELECT 
+            user_id,
+            email,
+            name,
+            chat_count,
+            project_count,
+            message_count,
+            input_tokens,
+            output_tokens,
+            cache_write_tokens,
+            cache_hit_tokens,
+            -- 전체 통계 계산을 위한 윈도우 함수
+            SUM(chat_count) OVER () as grand_total_chats,
+            SUM(project_count) OVER () as grand_total_projects,
+            SUM(message_count) OVER () as grand_total_messages,
+            SUM(input_tokens) OVER () as grand_total_input_tokens,
+            SUM(output_tokens) OVER () as grand_total_output_tokens
+        FROM user_aggregated
+        ORDER BY (chat_count + project_count) DESC
+        """)
+
+        result = db.execute(query, params).fetchall()
         
-        if user_id:
-            user_token_stats = user_token_stats.filter(TokenUsage.user_id == user_id)
+        if not result:
+            return {
+                "total_chats": 0,
+                "total_projects": 0,
+                "total_messages": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "user_stats": []
+            }
+
+        # 결과 처리
+        first_row = result[0]
+        user_stats = []
         
-        user_token_stats = user_token_stats.group_by(TokenUsage.user_id, TokenUsage.chat_type).all()
-
-        # 사용자별 통계 집계
-        user_stats = {}
-        
-        # 채팅방 수 집계
-        for stat in user_chat_stats:
-            if stat.user_id not in user_stats:
-                user_stats[stat.user_id] = {
-                    'chat_count': 0,
-                    'project_count': 0,
-                    'message_count': 0,
-                    'input_tokens': 0,
-                    'output_tokens': 0,
-                    'cache_write_tokens': 0,
-                    'cache_hit_tokens': 0,
-                    'chat_type_stats': {}
-                }
-            user_stats[stat.user_id]['chat_count'] = stat.chat_count
-
-        for stat in user_project_stats:
-            if stat.user_id not in user_stats:
-                user_stats[stat.user_id] = {
-                    'chat_count': 0,
-                    'project_count': 0,
-                    'message_count': 0,
-                    'input_tokens': 0,
-                    'output_tokens': 0
-                }
-            user_stats[stat.user_id]['project_count'] = stat.project_count
-
-        # 메시지 수 집계
-        for stat in user_message_stats:
-            if stat.user_id not in user_stats:
-                user_stats[stat.user_id] = {
-                    'chat_count': 0,
-                    'project_count': 0,
-                    'message_count': 0,
-                    'input_tokens': 0,
-                    'output_tokens': 0
-                }
-            user_stats[stat.user_id]['message_count'] += stat.message_count
-
-        for stat in user_project_message_stats:
-            if stat.user_id not in user_stats:
-                user_stats[stat.user_id] = {
-                    'chat_count': 0,
-                    'project_count': 0,
-                    'message_count': 0,
-                    'input_tokens': 0,
-                    'output_tokens': 0
-                }
-            user_stats[stat.user_id]['message_count'] += stat.message_count
-
-        # 토큰 사용량 집계
-        for stat in user_token_stats:
-            if stat.user_id not in user_stats:
-                user_stats[stat.user_id] = {
-                    'chat_count': 0,
-                    'project_count': 0,
-                    'message_count': 0,
-                    'input_tokens': 0,
-                    'output_tokens': 0,
-                    'cache_write_tokens': 0,
-                    'cache_hit_tokens': 0,
-                    'chat_type_stats': {}
-                }
-            if stat.chat_type:
-                if stat.chat_type not in user_stats[stat.user_id]['chat_type_stats']:
-                    user_stats[stat.user_id]['chat_type_stats'][stat.chat_type] = {
-                        'input_tokens': 0,
-                        'output_tokens': 0,
-                        'cache_write_tokens': 0,
-                        'cache_hit_tokens': 0
-                    }
-                user_stats[stat.user_id]['chat_type_stats'][stat.chat_type].update({
-                    'input_tokens': stat.total_input_tokens or 0,
-                    'output_tokens': stat.total_output_tokens or 0,
-                    'cache_write_tokens': stat.total_cache_write_tokens or 0,
-                    'cache_hit_tokens': stat.total_cache_hit_tokens or 0
+        for row in result:
+            if row.chat_count > 0 or row.project_count > 0 or row.message_count > 0:
+                user_stats.append({
+                    "user_id": row.user_id,
+                    "email": row.email,
+                    "name": row.name,
+                    "chat_count": row.chat_count,
+                    "project_count": row.project_count,
+                    "message_count": row.message_count,
+                    "input_tokens": row.input_tokens,
+                    "output_tokens": row.output_tokens,
+                    "cache_write_tokens": row.cache_write_tokens,
+                    "cache_hit_tokens": row.cache_hit_tokens
                 })
-            user_stats[stat.user_id].update({
-                'input_tokens': (user_stats[stat.user_id]['input_tokens'] + (stat.total_input_tokens or 0)),
-                'output_tokens': (user_stats[stat.user_id]['output_tokens'] + (stat.total_output_tokens or 0)),
-                'cache_write_tokens': (user_stats[stat.user_id]['cache_write_tokens'] + (stat.total_cache_write_tokens or 0)),
-                'cache_hit_tokens': (user_stats[stat.user_id]['cache_hit_tokens'] + (stat.total_cache_hit_tokens or 0))
-            })
 
-        # 프로젝트별 통계 쿼리 - 날짜 필터링 적용
-        project_query = db.query(
-            ProjectChat.project_id,
-            ProjectChat.user_id,
-            func.count(ProjectMessage.id).label('message_count'),
-            func.sum(TokenUsage.input_tokens).label('input_tokens'),
-            func.sum(TokenUsage.output_tokens).label('output_tokens')
-        ).join(
-            ProjectMessage, ProjectMessage.room_id == ProjectChat.id
-        ).outerjoin(
-            TokenUsage, TokenUsage.room_id == ProjectChat.id
-        )
-        
-        # 날짜 필터링 적용
-        if start_date is not None and end_date is not None:
-            project_query = project_query.filter(ProjectMessage.created_at.between(start_date, end_date))
-            project_query = project_query.filter(TokenUsage.timestamp.between(start_date, end_date))
-        elif start_date is not None:
-            project_query = project_query.filter(ProjectMessage.created_at >= start_date)
-            project_query = project_query.filter(TokenUsage.timestamp >= start_date)
-        elif end_date is not None:
-            project_query = project_query.filter(ProjectMessage.created_at <= end_date)
-            project_query = project_query.filter(TokenUsage.timestamp <= end_date)
-        
-        project_query = project_query.group_by(
-            ProjectChat.project_id, ProjectChat.user_id
-        )
-        if user_id:
-            project_query = project_query.filter(ProjectChat.user_id == user_id)
-        project_stats = project_query.all()
-
-        # 전체 토큰 사용량 계산
-        total_input_tokens = sum(stats['input_tokens'] for stats in user_stats.values())
-        total_output_tokens = sum(stats['output_tokens'] for stats in user_stats.values())
-
-        result = {
-            'total_chats': total_chats,
-            'total_messages': total_messages,
-            'total_input_tokens': total_input_tokens,
-            'total_output_tokens': total_output_tokens,
-            'user_stats': [{
-                'user_id': str(user_id),
-                'email': users.get(str(user_id), {}).get('email', 'Unknown'),
-                'name': users.get(str(user_id), {}).get('name', 'Unknown'),
-                'chat_count': stats['chat_count'] + stats['project_count'],
-                'message_count': stats['message_count'],
-                'input_tokens': stats['input_tokens'],
-                'output_tokens': stats['output_tokens']
-            } for user_id, stats in user_stats.items()],
-            'projects': [{
-                'project_id': stat.project_id,
-                'user_id': str(stat.user_id),
-                'user_email': users.get(str(stat.user_id), {}).get('email', 'Unknown'),
-                'user_name': users.get(str(stat.user_id), {}).get('name', 'Unknown'),
-                'message_count': stat.message_count,
-                'input_tokens': stat.input_tokens or 0,
-                'output_tokens': stat.output_tokens or 0
-            } for stat in project_stats]
+        return {
+            "total_chats": first_row.grand_total_chats or 0,
+            "total_projects": first_row.grand_total_projects or 0,
+            "total_messages": first_row.grand_total_messages or 0,
+            "total_input_tokens": first_row.grand_total_input_tokens or 0,
+            "total_output_tokens": first_row.grand_total_output_tokens or 0,
+            "user_stats": user_stats
         }
 
-        return result
     except Exception as e:
+        logger.error(f"채팅 통계 조회 중 오류 발생: {str(e)}", exc_info=True)
         # 기본값 반환
         return {
-            'total_chats': 0,
-            'total_messages': 0,
-            'total_input_tokens': 0,
-            'total_output_tokens': 0,
-            'user_stats': [],
-            'projects': []
+            "total_chats": 0,
+            "total_projects": 0,
+            "total_messages": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "user_stats": []
         } 

@@ -5,7 +5,9 @@ from app.models.embedding import ProjectEmbedding
 from pydantic import BaseModel
 from datetime import datetime
 import numpy as np
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ProjectEmbeddingCreate(BaseModel):
     project_id: str
@@ -151,8 +153,8 @@ def search_similar(
     - HNSW 인덱스 활용으로 고성능 검색
     """
     try:
-        print(f"🔍 지식베이스 검색 시작 (pgvector 네이티브): top_k={top_k}, threshold={threshold}")
-        print(f"   프로젝트 ID: {project_id}")
+        logger.info(f"지식베이스 검색 시작 (pgvector 네이티브): top_k={top_k}, threshold={threshold}")
+        logger.info(f"   프로젝트 ID: {project_id}")
         
         # pgvector 네이티브 코사인 유사도 검색
         results = db.query(
@@ -194,15 +196,15 @@ def search_similar(
                 "created_at": result.created_at.isoformat() if result.created_at else None
             })
         
-        print(f"✅ pgvector 네이티브 검색 완료: {len(search_results)}개 결과")
+        logger.info(f"pgvector 네이티브 검색 완료: {len(search_results)}개 결과")
         for i, result in enumerate(search_results):
-            print(f"   [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}")
+            logger.info(f"   [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}")
         
         return search_results
         
     except Exception as e:
-        print(f"❌ pgvector 네이티브 검색 실패: {e}")
-        print("   폴백 검색 모드로 전환...")
+        logger.error(f"pgvector 네이티브 검색 실패: {e}", exc_info=True)
+        logger.warning("폴백 검색 모드로 전환...")
         return _fallback_search_similar(db, project_id, query_embedding, top_k, threshold)
 
 
@@ -221,7 +223,7 @@ def _normalize_embedding_vector(embedding_vector: List[float]) -> List[float]:
         return normalized.tolist()
         
     except Exception as e:
-        print(f"벡터 정규화 오류: {e}")
+        logger.error(f"벡터 정규화 오류: {e}", exc_info=True)
         return embedding_vector
 
 
@@ -233,7 +235,7 @@ def _fallback_search_similar(
     threshold: float = 0.7
 ) -> List[Dict[str, Any]]:
     """폴백: 기존 방식의 유사도 검색"""
-    print("⚠️  폴백 검색 모드 사용 (성능 저하)")
+    logger.warning("폴백 검색 모드 사용 (성능 저하)")
     
     embeddings = get_by_project(db, project_id)
     
@@ -287,7 +289,7 @@ def _calculate_cosine_similarity_fallback(vec1: List[float], vec2: List[float]) 
         return float(similarity)
         
     except Exception as e:
-        print(f"유사도 계산 오류: {e}")
+        logger.error(f"유사도 계산 오류: {e}", exc_info=True)
         return 0.0
 
 
@@ -327,10 +329,10 @@ def batch_create_embeddings(
         for embedding in embeddings:
             db.refresh(embedding)
         
-        print(f"✅ 배치 임베딩 생성 완료: {len(embeddings)}개")
+        logger.info(f"배치 임베딩 생성 완료: {len(embeddings)}개")
         return embeddings
         
     except Exception as e:
-        print(f"❌ 배치 임베딩 생성 실패: {e}")
+        logger.error(f"배치 임베딩 생성 실패: {e}", exc_info=True)
         db.rollback()
         return [] 

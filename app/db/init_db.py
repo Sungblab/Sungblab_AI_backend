@@ -1,18 +1,18 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 from app.db.base import Base
 from app.db.session import engine, SessionLocal
 from app.crud import crud_user
 from app.schemas.auth import UserCreate
 from app.core.config import settings
-from app.models.subscription import Subscription, SubscriptionPlan
-from datetime import datetime, timedelta
+from app.models.subscription import Subscription, SubscriptionPlan, PLAN_LIMITS
+from datetime import datetime, timedelta, timezone
 from app.models.user import User
-from app.core.utils import get_kr_time
 import logging
 import time
 
-logger = logging.getLogger("sungblab_api")
+logger = logging.getLogger(__name__)
 
 def init_db() -> None:
     # 데이터베이스 연결 재시도 로직
@@ -21,6 +21,24 @@ def init_db() -> None:
         try:
             # 데이터베이스 테이블 생성
             Base.metadata.create_all(bind=engine)
+            
+            # 기존 테이블에 누락된 컬럼 추가
+            with engine.connect() as conn:
+                # similarity_threshold 컬럼이 없으면 추가
+                try:
+                    result = conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'project_embeddings' AND column_name = 'similarity_threshold'"
+                    ))
+                    if not result.fetchone():
+                        conn.execute(text(
+                            "ALTER TABLE project_embeddings ADD COLUMN similarity_threshold FLOAT DEFAULT NULL"
+                        ))
+                        conn.commit()
+                        logger.info("Added similarity_threshold column to project_embeddings table")
+                except Exception as e:
+                    logger.warning(f"Could not check/add similarity_threshold column: {e}")
+            
             break
         except OperationalError as e:
             if "too many clients already" in str(e):
@@ -40,7 +58,11 @@ def init_db() -> None:
         try:
             db = SessionLocal()
             # 관리자 계정이 이미 존재하는지 확인
-            existing_admin = crud_user.get_user_by_email(db, email=settings.ADMIN_EMAIL)
+            try:
+                existing_admin = crud_user.get_user_by_email(db, email=settings.ADMIN_EMAIL)
+            except Exception as e:
+                logger.warning(f"Error checking for existing admin: {e}. Assuming no admin exists yet.")
+                existing_admin = None
             
             if not existing_admin and settings.CREATE_INITIAL_ADMIN:
                 admin_in = UserCreate(
@@ -51,9 +73,9 @@ def init_db() -> None:
                 )
                 admin = crud_user.create_user(db, obj_in=admin_in)
                 db.commit()
-                print("Admin user created")
+                logger.info("Admin user created")
             else:
-                print("Admin user already exists")
+                logger.info("Admin user already exists")
             
             # 모든 사용자에 대해 기본 구독 정보 생성
             users = db.query(User).all()
@@ -64,20 +86,19 @@ def init_db() -> None:
                 
                 if not subscription:
                     # 초기 갱신일 설정 - timezone 정보 포함
-                    initial_renewal_date = get_kr_time() + timedelta(days=30)
+                    initial_renewal_date = datetime.now(timezone.utc) + timedelta(days=30)
                     
                     subscription = Subscription(
                         user_id=str(user.id),
                         plan=SubscriptionPlan.FREE,
                         status="active",
-                        start_date=get_kr_time(),
-                        renewal_date=initial_renewal_date,
-                        message_limit=15
+                        start_date=datetime.now(timezone.utc),
+                        renewal_date=initial_renewal_date
                     )
                     db.add(subscription)
             
             db.commit()
-            print("Database initialization completed successfully")
+            logger.info("Database initialization completed successfully")
             break
             
         except OperationalError as e:

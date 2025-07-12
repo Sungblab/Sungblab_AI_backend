@@ -1,15 +1,14 @@
-from sqlalchemy import Column, String, Integer, Float, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Text, ForeignKey
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.db.base_class import Base
-import uuid
+from app.core.utils import generate_uuid
 from pgvector.sqlalchemy import Vector
 
 class ProjectEmbedding(Base):
     """프로젝트 파일 임베딩 저장 모델 (pgvector 사용)"""
     __tablename__ = "project_embeddings"
     
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True, default=generate_uuid)
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     file_id = Column(String, nullable=False)  # Gemini File API ID
     file_name = Column(String, nullable=False)
@@ -22,11 +21,7 @@ class ProjectEmbedding(Base):
     embedding_model = Column(String, nullable=False, default="text-embedding-004")
     task_type = Column(String, nullable=False, default="RETRIEVAL_DOCUMENT")
     chunk_size = Column(Integer, nullable=False)
-    similarity_threshold = Column(Float, default=0.7)
-    
-    # 메타데이터
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    similarity_threshold = Column(Float, nullable=True, default=None)
     
     # 관계 설정
     project = relationship("Project", back_populates="embeddings")
@@ -42,7 +37,6 @@ class ProjectEmbedding(Base):
             "embedding_model": self.embedding_model,
             "task_type": self.task_type,
             "chunk_size": self.chunk_size,
-            "similarity_threshold": self.similarity_threshold,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

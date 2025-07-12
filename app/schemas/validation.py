@@ -6,11 +6,12 @@ Pydantic 모델을 통한 종합적인 입력 검증 시스템
 import re
 from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, validator, Field, EmailStr
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+from app.core.config import validation_config
 import bleach
 
-from app.core.security_enhanced import InputValidator, SecurityLevel
+from app.core.security import InputValidator, SecurityLevel
 
 class ModelType(str, Enum):
     """지원되는 AI 모델 타입"""
@@ -177,8 +178,7 @@ class FileUploadValidation(SecureBaseModel):
     def validate_filename(cls, v):
         """파일명 검증"""
         # 위험한 문자 제거
-        dangerous_chars = ['<', '>', ':', '"', '|', '?', '*', '\0']
-        for char in dangerous_chars:
+        for char in validation_config.DANGEROUS_FILENAME_CHARS:
             if char in v:
                 raise ValueError(f"파일명에 허용되지 않는 문자가 포함되어 있습니다: {char}")
         
@@ -187,13 +187,8 @@ class FileUploadValidation(SecureBaseModel):
             raise ValueError("잘못된 파일 경로입니다.")
         
         # 파일 확장자 검증
-        allowed_extensions = {
-            '.txt', '.pdf', '.csv', '.md', '.docx', '.doc', 
-            '.xlsx', '.xls', '.jpg', '.jpeg', '.png', '.gif', '.webp'
-        }
-        
         file_ext = '.' + v.split('.')[-1].lower() if '.' in v else ''
-        if file_ext not in allowed_extensions:
+        if file_ext not in validation_config.ALLOWED_FILE_EXTENSIONS:
             raise ValueError(f"지원되지 않는 파일 형식입니다: {file_ext}")
         
         return v
@@ -255,12 +250,7 @@ class UserRegistration(SecureBaseModel):
             raise ValueError("비밀번호는 대문자, 소문자, 숫자, 특수문자 중 최소 3가지를 포함해야 합니다.")
         
         # 일반적인 패턴 차단
-        common_patterns = [
-            'password', '123456', 'qwerty', 'admin', 'user',
-            'test', 'guest', '000000', '111111'
-        ]
-        
-        if any(pattern in v.lower() for pattern in common_patterns):
+        if any(pattern in v.lower() for pattern in validation_config.COMMON_PASSWORD_PATTERNS):
             raise ValueError("일반적인 패턴의 비밀번호는 사용할 수 없습니다.")
         
         return v
@@ -397,8 +387,14 @@ class ValidationHelper:
     
     @staticmethod
     def validate_date_range(date_from: Optional[datetime], date_to: Optional[datetime]) -> tuple:
-        """날짜 범위 검증"""
+        """날짜 범위 검증 (timezone-aware datetime 처리)"""
         if date_from and date_to:
+            # timezone-naive datetime을 UTC로 변환
+            if date_from.tzinfo is None:
+                date_from = date_from.replace(tzinfo=timezone.utc)
+            if date_to.tzinfo is None:
+                date_to = date_to.replace(tzinfo=timezone.utc)
+                
             if date_from > date_to:
                 raise ValueError("시작 날짜가 종료 날짜보다 늦을 수 없습니다.")
         

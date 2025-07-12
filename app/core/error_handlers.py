@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError, HTTPException
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Union
+import logging
 import traceback
 from datetime import datetime
 
@@ -13,11 +14,11 @@ from app.core.exceptions import (
     create_error_response
 )
 from app.core.error_tracking import error_tracker
-from app.core.structured_logging import StructuredLogger
+
 from app.core.config import settings
 
 # 구조화된 로거 초기화
-logger = StructuredLogger("error_handler")
+error_logger = logging.getLogger("error_handler")
 
 def setup_error_handlers(app: FastAPI) -> None:
     """글로벌 에러 핸들러 설정"""
@@ -83,7 +84,7 @@ def setup_error_handlers(app: FastAPI) -> None:
         # 데이터베이스 에러를 APIError로 변환
         api_error = APIError(
             error_code=ErrorCode.DATABASE_ERROR,
-            message=f"Database error: {str(exc)}",
+            detail=f"Database error: {str(exc)}",
             status_code=500,
             severity=ErrorSeverity.HIGH
         )
@@ -122,18 +123,19 @@ async def _log_and_track_error(
     request_info = await _extract_request_info(request)
     
     # 구조화된 로깅
-    logger.log_error(
-        error=original_exception or error,
-        context={
+    error_logger.error(
+        msg=f"API Error: {error.error_code} - {error.detail}",
+        exc_info=original_exception or error,
+        extra={
             "error_id": error.error_id,
             "error_code": error.error_code,
             "status_code": error.status_code,
             "severity": severity,
             "request_info": request_info,
-            "traceback": traceback.format_exc() if original_exception else None
-        },
-        user_id=request_info.get("user_id"),
-        request_id=request_info.get("request_id")
+            "traceback": traceback.format_exc() if original_exception else None,
+            "user_id": request_info.get("user_id"),
+            "request_id": request_info.get("request_id")
+        }
     )
     
     # Sentry 에러 추적 (심각도에 따라)
@@ -213,7 +215,7 @@ def _convert_http_exception_to_api_error(exc: HTTPException) -> APIError:
     
     return APIError(
         error_code=error_code,
-        message=str(exc.detail),
+        detail=str(exc.detail),
         status_code=exc.status_code,
         severity=severity
     )

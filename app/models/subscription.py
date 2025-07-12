@@ -2,19 +2,10 @@ from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey, E
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.attributes import flag_modified
 from app.db.base_class import Base
-from datetime import datetime, timedelta
-from app.core.utils import get_kr_time
-from app.core.models import (
-    ModelGroup, PLAN_LIMITS, MODEL_GROUP_MAPPING, ACTIVE_MODELS
-)
+from datetime import datetime, timedelta, timezone
+from app.core.utils import generate_uuid
+from app.core.models import ModelGroup, PLAN_LIMITS, MODEL_GROUP_MAPPING, ACTIVE_MODELS
 import enum
-import uuid
-import pytz
-
-KST = pytz.timezone('Asia/Seoul')
-
-def generate_uuid():
-    return str(uuid.uuid4())
 
 class SubscriptionPlan(str, enum.Enum):
     FREE = "FREE"
@@ -28,10 +19,10 @@ class Subscription(Base):
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
     plan = Column(SQLEnum(SubscriptionPlan), default=SubscriptionPlan.FREE)
     status = Column(String, default="active")  # active, cancelled, expired
-    start_date = Column(DateTime(timezone=True), default=get_kr_time)
-    end_date = Column(DateTime(timezone=True), default=lambda: get_kr_time() + timedelta(days=30))
+    start_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    end_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc) + timedelta(days=30))
     auto_renew = Column(Boolean, default=True)
-    renewal_date = Column(DateTime(timezone=True), default=lambda: get_kr_time() + timedelta(days=30))
+    renewal_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc) + timedelta(days=30))
     
     # 그룹별 사용량 추적
     group_usage = Column(JSON, default={
@@ -49,7 +40,7 @@ class Subscription(Base):
     def update_limits_for_plan(self):
         """현재 플랜에 맞는 제한량으로 업데이트하고 구독 기간을 초기화합니다."""
         self.group_limits = PLAN_LIMITS[self.plan]
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         
         # 구독 기간을 현재 시점부터 30일로 초기화
         self.start_date = current_time
@@ -64,7 +55,7 @@ class Subscription(Base):
 
     def check_expiration(self):
         """구독 만료 여부를 확인하고 상태를 업데이트합니다."""
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         if self.end_date and current_time > self.end_date:
             if self.auto_renew:
                 self.renew_subscription()
@@ -73,7 +64,7 @@ class Subscription(Base):
 
     def renew_subscription(self):
         """구독을 갱신합니다."""
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         self.start_date = current_time
         self.end_date = current_time + timedelta(days=30)
         self.renewal_date = self.end_date
@@ -96,6 +87,10 @@ class Subscription(Base):
         if not group:
             return False
         return self.group_usage[group] < self.group_limits[group]
+
+    def can_increment_usage(self, model_name: str) -> bool:
+        """특정 모델의 사용량을 증가시킬 수 있는지 미리 확인합니다. (락 없이 빠른 체크)"""
+        return self.can_use_model(model_name)
 
     def increment_usage(self, model_name: str) -> bool:
         """모델 사용량을 증가시킵니다."""
@@ -159,7 +154,7 @@ class Subscription(Base):
             "user_name": self.user.full_name if self.user else "[삭제된 사용자]",
             "group_usage": self.group_usage,
             "group_limits": self.group_limits,
-            "days_remaining": (self.end_date - get_kr_time()).days if self.end_date else 0
+            "days_remaining": (self.end_date - datetime.now(timezone.utc)).days if self.end_date else 0
         }
         
         # 각 그룹별 남은 사용량 추가

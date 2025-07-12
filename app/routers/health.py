@@ -24,14 +24,14 @@ def detailed_health_check():
     health_status = get_health_status()
     return health_status
 
-@router.get("/health/metrics", tags=["health"])
-def health_metrics():
+@router.get("/health/current_metrics", tags=["health"])
+def current_health_metrics():
     """
-    헬스 메트릭 히스토리 엔드포인트
+    현재 헬스 메트릭 엔드포인트
     
-    시스템 메트릭의 히스토리를 반환합니다.
+    시스템의 현재 메트릭을 반환합니다.
     """
     return {
-        "metrics_history": health_monitor.get_metrics_history(),
+        "current_metrics": health_monitor.get_current_metrics(),
         "timestamp": datetime.now(KST).isoformat()
     } 

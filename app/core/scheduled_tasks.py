@@ -6,9 +6,12 @@ import schedule
 import time
 import threading
 from datetime import datetime, timedelta
+import os
 from app.core.logging_config import cleanup_old_logs, get_log_files_info
 from app.core.config import settings
 import logging
+from sqlalchemy.orm import sessionmaker
+from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ class ScheduledTasks:
         # 스케줄 등록
         schedule.every().day.at("02:00").do(self.cleanup_logs_task)  # 매일 새벽 2시
         schedule.every().week.do(self.weekly_maintenance_task)  # 주간 유지보수
+        schedule.every().day.at("03:00").do(self.check_subscription_expiry_task)  # 매일 새벽 3시 구독 만료 체크
         
         # 백그라운드 스레드 시작
         self.thread = threading.Thread(target=self._run_scheduler, daemon=True)
@@ -98,6 +102,62 @@ class ScheduledTasks:
         """즉시 로그 정리 실행"""
         logger.info("Force cleanup initiated")
         self.cleanup_logs_task()
+        
+    def check_subscription_expiry_task(self):
+        """구독 만료 체크 및 자동 갱신 태스크"""
+        try:
+            from app.models.subscription import Subscription
+            from app.models.user import User
+            
+            db = SessionLocal()
+            
+            try:
+                # 모든 활성 구독 조회
+                subscriptions = db.query(Subscription).filter(
+                    Subscription.status == "active"
+                ).all()
+                
+                renewed_count = 0
+                expired_count = 0
+                
+                for subscription in subscriptions:
+                    try:
+                        # 구독 만료 체크 및 자동 갱신 로직 실행
+                        subscription.check_expiration()
+                        
+                        # 갱신된 경우 로그 기록
+                        if subscription.plan.value == "FREE" and subscription.status == "active":
+                            renewed_count += 1
+                            logger.info(f"Subscription renewed to FREE plan for user {subscription.user_id}")
+                        
+                        # 만료된 경우 로그 기록
+                        if subscription.status == "expired":
+                            expired_count += 1
+                            logger.warning(f"Subscription expired for user {subscription.user_id}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing subscription {subscription.id}: {e}")
+                        continue
+                
+                # 변경사항 커밋
+                db.commit()
+                
+                logger.info(f"Subscription expiry check completed. Renewed: {renewed_count}, Expired: {expired_count}")
+                
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Database error in subscription expiry task: {e}")
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"Error in subscription expiry task: {e}")
+            
+    def force_subscription_check(self):
+        """즉시 구독 만료 체크 실행"""
+        logger.info("Force subscription check initiated")
+        self.check_subscription_expiry_task()
 
 # 전역 스케줄 매니저
 scheduled_tasks = ScheduledTasks() 

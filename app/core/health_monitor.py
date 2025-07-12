@@ -216,11 +216,9 @@ class HealthMonitor:
             }
         }
     
-    def get_metrics_history(self, limit: int = 50) -> list:
-        """메트릭 히스토리 반환 (현재 상태만)"""
-        # 히스토리 저장하지 않음 (메모리 절약)
-        current_metrics = self.get_health_status()
-        return [current_metrics] if current_metrics else []
+    def get_current_metrics(self) -> Dict[str, Any]:
+        """현재 메트릭 반환"""
+        return self.get_health_status()
 
 # 전역 헬스 모니터 (온디맨드 방식)
 health_monitor = HealthMonitor()

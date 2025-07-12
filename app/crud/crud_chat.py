@@ -3,21 +3,11 @@ from sqlalchemy import func
 from app.models.chat_room import ChatRoom
 from app.models.chat import ChatMessage
 from app.schemas.chat import ChatRoomCreate, ChatMessageCreate
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 from fastapi import HTTPException
-from app.core.utils import get_kr_time
 
-def find_smallest_available_id(db: Session) -> int:
-    # 현재 사용 중인 모든 ID를 가져옴
-    used_ids = set(id_tuple[0] for id_tuple in db.query(ChatRoom.id).all())
-    
-    # 1부터 시작해서 사용되지 않은 가장 작은 ID를 찾음
-    smallest_id = 1
-    while smallest_id in used_ids:
-        smallest_id += 1
-    
-    return smallest_id
+
 
 def create_chat_room(db: Session, room: ChatRoomCreate, user_id: str) -> ChatRoom:
     try:
@@ -25,8 +15,8 @@ def create_chat_room(db: Session, room: ChatRoomCreate, user_id: str) -> ChatRoo
         db_room = ChatRoom(
             name=room.name,
             user_id=user_id,  # 사용자 ID 추가
-            created_at=get_kr_time(),
-            updated_at=get_kr_time()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(db_room)
         db.flush()
@@ -65,7 +55,7 @@ def delete_chat_room(db: Session, room_id: str, user_id: str) -> bool:
 
 def create_message(db: Session, room_id: str, message: ChatMessageCreate) -> ChatMessage:
     try:
-        current_time = get_kr_time()
+        current_time = datetime.now(timezone.utc)
         db_message = ChatMessage(
             room_id=room_id,
             content=message.content,
@@ -112,7 +102,7 @@ def update_chat_room(db: Session, room_id: str, room: ChatRoomCreate, user_id: s
         raise HTTPException(status_code=404, detail="Chat room not found")
     
     db_room.name = room.name
-    db_room.updated_at = get_kr_time()
+    db_room.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(db_room)
     return db_room

@@ -27,9 +27,26 @@ services:
       - ADMIN_NAME=${ADMIN_NAME}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD}
       - CREATE_INITIAL_ADMIN=${CREATE_INITIAL_ADMIN}
-      - ENVIRONMENT=development
+      - ENVIRONMENT=${ENVIRONMENT}
       - DEBUG=true
-      - PYTHONOPTIMIZE=0
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
+      - REDIS_URL=${REDIS_URL}
     command: ./start.sh
+    depends_on:
+      - redis
+    networks:
+      - app-network
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+volumes:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge

@@ -1,17 +1,16 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 from app.models.user import User
 from app.models.subscription import Subscription, SubscriptionPlan
 from app.models.chat import ChatMessage
 from app.models.chat_room import ChatRoom
 from app.models.stats import TokenUsage
-from app.core.utils import get_kr_time
 
 def get_user_stats(db: Session) -> Dict:
     """사용자 통계를 조회합니다."""
-    now = get_kr_time()
+    now = datetime.now(timezone.utc)
     month_ago = now - timedelta(days=30)
     two_months_ago = now - timedelta(days=60)
 
@@ -72,7 +71,7 @@ def get_user_stats(db: Session) -> Dict:
 
 def get_subscription_stats(db: Session) -> Dict:
     """구독 통계를 조회합니다."""
-    now = get_kr_time()
+    now = datetime.now(timezone.utc)
 
     # 전체 구독자 수 (무료 플랜 제외)
     total_subs = db.query(func.count(Subscription.id)).filter(

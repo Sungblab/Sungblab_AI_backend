@@ -10,16 +10,14 @@ import uuid
 from typing import List, Dict, Any, Optional, Callable, Union
 from dataclasses import dataclass, asdict
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import heapq
-
-from app.core.structured_logging import StructuredLogger
-from app.core.performance_cache import perf_logger
+import logging
 
 # 배치 처리 로거
-batch_logger = StructuredLogger("batch_processing")
+logger = logging.getLogger(__name__)
 
 class TaskStatus(str, Enum):
     """작업 상태"""
@@ -54,7 +52,7 @@ class BatchTask:
     
     def __post_init__(self):
         if self.created_at is None:
-            self.created_at = datetime.utcnow()
+            self.created_at = datetime.now(timezone.utc)
         if self.id is None:
             self.id = str(uuid.uuid4())
     
@@ -106,12 +104,12 @@ class EmbeddingBatchProcessor:
         with self.processing_lock:
             self.processing_queue.append(task)
             
-        batch_print("embedding_task_added", {
+        logger.info("embedding_task_added", extra={"data": {
             "task_id": task.id,
             "text_count": len(texts),
             "model": model,
             "project_id": project_id
-        })
+        }})
         
         return task.id
     
@@ -124,31 +122,28 @@ class EmbeddingBatchProcessor:
         """임베딩 배치 처리"""
         
         start_time = time.time()
-        batch_print("embedding_batch_started", {
+        logger.info("embedding_batch_started", extra={"data": {
             "batch_size": len(batch_tasks),
             "task_ids": [task.id for task in batch_tasks]
-        })
+        }})
         
         try:
-            # 모든 텍스트를 하나의 배치로 수집
             all_texts = []
             task_text_mapping = {}
             
             for task in batch_tasks:
                 task.status = TaskStatus.PROCESSING
-                task.started_at = datetime.utcnow()
+                task.started_at = datetime.now(timezone.utc)
                 
                 texts = task.data["texts"]
                 start_idx = len(all_texts)
                 all_texts.extend(texts)
                 task_text_mapping[task.id] = (start_idx, start_idx + len(texts))
             
-            # 배치 임베딩 생성
-            model = batch_tasks[0].data["model"]  # 모든 작업이 같은 모델이라고 가정
+            model = batch_tasks[0].data["model"]
             
             embeddings = await embedding_func(all_texts, model, client)
             
-            # 결과를 각 작업에 분배
             for task in batch_tasks:
                 start_idx, end_idx = task_text_mapping[task.id]
                 task_embeddings = embeddings[start_idx:end_idx]
@@ -159,29 +154,28 @@ class EmbeddingBatchProcessor:
                     "embedding_dimensions": len(task_embeddings[0]) if task_embeddings else 0
                 }
                 task.status = TaskStatus.COMPLETED
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(timezone.utc)
             
-            batch_print("embedding_batch_completed", {
+            logger.info("embedding_batch_completed", extra={"data": {
                 "batch_size": len(batch_tasks),
                 "total_embeddings": len(all_texts),
                 "duration": time.time() - start_time,
                 "success": True
-            })
+            }})
             
         except Exception as e:
-            # 배치 전체 실패 처리
             for task in batch_tasks:
                 if task.status == TaskStatus.PROCESSING:
                     task.status = TaskStatus.FAILED
                     task.error = str(e)
-                    task.completed_at = datetime.utcnow()
+                    task.completed_at = datetime.now(timezone.utc)
                     task.retry_count += 1
             
-            batch_logger.error("embedding_batch_failed", {
+            logger.error("embedding_batch_failed", extra={"data": {
                 "batch_size": len(batch_tasks),
                 "error": str(e),
                 "duration": time.time() - start_time
-            })
+            }})
         
         return batch_tasks
 
@@ -207,20 +201,18 @@ class FileBatchProcessor:
         if len(file_content.encode()) > self.max_file_size:
             raise ValueError(f"File too large: {len(file_content.encode())} bytes")
         
-        batch_print("large_file_processing_started", {
+        logger.info("large_file_processing_started", extra={"data": {
             "file_name": file_name,
             "file_size": len(file_content),
             "project_id": project_id,
             "chunk_size": self.chunk_size
-        })
+        }})
         
         try:
-            # 텍스트를 청크로 분할
             chunks = await self._split_text_into_chunks(
                 file_content, self.chunk_size, chunk_overlap
             )
             
-            # 청크별 메타데이터 생성
             chunk_data = []
             for i, chunk in enumerate(chunks):
                 chunk_data.append({
@@ -232,21 +224,21 @@ class FileBatchProcessor:
                     "file_id": file_id
                 })
             
-            batch_print("large_file_processing_completed", {
+            logger.info("large_file_processing_completed", extra={"data": {
                 "file_name": file_name,
                 "total_chunks": len(chunks),
                 "duration": time.time() - start_time,
                 "avg_chunk_size": sum(len(c) for c in chunks) / len(chunks) if chunks else 0
-            })
+            }})
             
             return chunk_data
             
         except Exception as e:
-            batch_logger.error("large_file_processing_failed", {
+            logger.error("large_file_processing_failed", extra={"data": {
                 "file_name": file_name,
                 "error": str(e),
                 "duration": time.time() - start_time
-            })
+            }})
             raise
     
     async def _split_text_into_chunks(
@@ -266,9 +258,7 @@ class FileBatchProcessor:
         while start < len(text):
             end = min(start + chunk_size, len(text))
             
-            # 단어 경계에서 자르기 위해 조정
             if end < len(text):
-                # 마지막 공백이나 줄바꿈 찾기
                 last_space = text.rfind(' ', start, end)
                 last_newline = text.rfind('\n', start, end)
                 
@@ -280,10 +270,8 @@ class FileBatchProcessor:
             if chunk:
                 chunks.append(chunk)
             
-            # 다음 청크 시작점 (오버랩 고려)
             start = max(start + 1, end - overlap)
             
-            # 무한 루프 방지
             if start >= len(text):
                 break
         
@@ -295,9 +283,9 @@ class AsyncTaskQueue:
     def __init__(self, max_workers: int = 10, max_queue_size: int = 1000):
         self.max_workers = max_workers
         self.max_queue_size = max_queue_size
-        self.task_queue = []  # 우선순위 큐
-        self.active_tasks = {}  # 진행 중인 작업들
-        self.completed_tasks = {}  # 완료된 작업들 (제한된 수만 보관)
+        self.task_queue = []
+        self.active_tasks = {}
+        self.completed_tasks = {}
         self.worker_semaphore = asyncio.Semaphore(max_workers)
         self.queue_lock = asyncio.Lock()
         self.is_running = False
@@ -305,12 +293,11 @@ class AsyncTaskQueue:
     async def start(self):
         """큐 시작"""
         self.is_running = True
-        batch_print("task_queue_started", {
+        logger.info("task_queue_started", extra={"data": {
             "max_workers": self.max_workers,
             "max_queue_size": self.max_queue_size
-        })
+        }})
         
-        # 워커들 시작
         workers = []
         for i in range(self.max_workers):
             worker = asyncio.create_task(self._worker(f"worker-{i}"))
@@ -321,40 +308,36 @@ class AsyncTaskQueue:
     async def stop(self):
         """큐 중지"""
         self.is_running = False
-        batch_print("task_queue_stopped", {})
+        logger.info("task_queue_stopped", extra={"data": {}})
     
     async def add_task(self, task: BatchTask) -> bool:
         """작업 추가"""
         async with self.queue_lock:
             if len(self.task_queue) >= self.max_queue_size:
-                batch_logger.warning("task_queue_full", {
+                logger.warning("task_queue_full", extra={"data": {
                     "queue_size": len(self.task_queue),
                     "max_size": self.max_queue_size
-                })
+                }})
                 return False
             
             heapq.heappush(self.task_queue, task)
-            batch_print("task_added_to_queue", {
+            logger.info("task_added_to_queue", extra={"data": {
                 "task_id": task.id,
                 "task_type": task.task_type,
                 "priority": task.priority.name,
                 "queue_size": len(self.task_queue)
-            })
+            }})
             
         return True
     
     async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """작업 상태 조회"""
-        
-        # 진행 중인 작업에서 찾기
         if task_id in self.active_tasks:
             return self.active_tasks[task_id].to_dict()
         
-        # 완료된 작업에서 찾기
         if task_id in self.completed_tasks:
             return self.completed_tasks[task_id].to_dict()
         
-        # 큐에서 찾기
         async with self.queue_lock:
             for task in self.task_queue:
                 if task.id == task_id:
@@ -364,28 +347,26 @@ class AsyncTaskQueue:
     
     async def _worker(self, worker_name: str):
         """워커 함수"""
-        batch_print("worker_started", {"worker_name": worker_name})
+        logger.info("worker_started", extra={"data": {"worker_name": worker_name}})
         
         while self.is_running:
             try:
-                # 큐에서 작업 가져오기
                 task = await self._get_next_task()
                 if task is None:
-                    await asyncio.sleep(0.1)  # 잠시 대기
+                    await asyncio.sleep(0.1)
                     continue
                 
-                # 세마포어로 동시 실행 수 제한
                 async with self.worker_semaphore:
                     await self._process_task(task, worker_name)
                     
             except Exception as e:
-                batch_logger.error("worker_error", {
+                logger.error("worker_error", extra={"data": {
                     "worker_name": worker_name,
                     "error": str(e)
-                })
-                await asyncio.sleep(1)  # 에러 발생시 잠시 대기
+                }})
+                await asyncio.sleep(1)
         
-        batch_print("worker_stopped", {"worker_name": worker_name})
+        logger.info("worker_stopped", extra={"data": {"worker_name": worker_name}})
     
     async def _get_next_task(self) -> Optional[BatchTask]:
         """큐에서 다음 작업 가져오기"""
@@ -397,19 +378,18 @@ class AsyncTaskQueue:
     async def _process_task(self, task: BatchTask, worker_name: str):
         """작업 처리"""
         task.status = TaskStatus.PROCESSING
-        task.started_at = datetime.utcnow()
+        task.started_at = datetime.now(timezone.utc)
         self.active_tasks[task.id] = task
         
-        batch_print("task_processing_started", {
+        logger.info("task_processing_started", extra={"data": {
             "task_id": task.id,
             "task_type": task.task_type,
             "worker_name": worker_name
-        })
+        }})
         
         start_time = time.time()
         
         try:
-            # 작업 타입에 따른 처리
             if task.task_type == "embedding_generation":
                 await self._process_embedding_task(task)
             elif task.task_type == "file_processing":
@@ -418,48 +398,43 @@ class AsyncTaskQueue:
                 raise ValueError(f"Unknown task type: {task.task_type}")
             
             task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             
-            batch_print("task_processing_completed", {
+            logger.info("task_processing_completed", extra={"data": {
                 "task_id": task.id,
                 "task_type": task.task_type,
                 "duration": time.time() - start_time,
                 "worker_name": worker_name
-            })
+            }})
             
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.error = str(e)
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             task.retry_count += 1
             
-            batch_logger.error("task_processing_failed", {
+            logger.error("task_processing_failed", extra={"data": {
                 "task_id": task.id,
                 "task_type": task.task_type,
                 "error": str(e),
                 "retry_count": task.retry_count,
                 "duration": time.time() - start_time,
                 "worker_name": worker_name
-            })
+            }})
             
-            # 재시도 로직
             if task.retry_count < task.max_retries:
-                # 지수 백오프로 재시도
-                delay = min(2 ** task.retry_count, 60)  # 최대 60초
+                delay = min(2 ** task.retry_count, 60)
                 await asyncio.sleep(delay)
                 
                 task.status = TaskStatus.PENDING
                 await self.add_task(task)
         
         finally:
-            # 활성 작업에서 제거하고 완료된 작업에 추가
             if task.id in self.active_tasks:
                 del self.active_tasks[task.id]
             
-            # 완료된 작업 저장 (최대 1000개만 보관)
             self.completed_tasks[task.id] = task
             if len(self.completed_tasks) > 1000:
-                # 가장 오래된 작업 제거
                 oldest_task_id = min(
                     self.completed_tasks.keys(),
                     key=lambda x: self.completed_tasks[x].completed_at or datetime.min
@@ -467,17 +442,87 @@ class AsyncTaskQueue:
                 del self.completed_tasks[oldest_task_id]
     
     async def _process_embedding_task(self, task: BatchTask):
-        """임베딩 작업 처리"""
-        # 실제 임베딩 생성 로직 구현
-        # 이는 구체적인 임베딩 생성 함수와 연동되어야 함
-        await asyncio.sleep(0.1)  # 플레이스홀더
-        task.result = {"status": "processed", "type": "embedding"}
+        """임베딩 생성 작업 처리"""
+        try:
+            data = task.data
+            texts = data["texts"]
+            model = data["model"]
+            project_id = data["project_id"]
+            file_id = data["file_id"]
+            
+            # EmbeddingBatchProcessor 인스턴스 사용
+            embedding_processor = EmbeddingBatchProcessor()
+            
+            # 단일 임베딩 작업을 배치로 처리
+            batch_tasks = [task]
+            
+            # 실제 임베딩 생성 함수가 필요한 경우, 여기서 호출
+            # 현재는 모의 처리로 대체
+            processed_tasks = await embedding_processor.process_embedding_batch(
+                batch_tasks,
+                client=None,  # 실제 구현 시 AI 클라이언트 전달 필요
+                embedding_func=self._mock_embedding_function
+            )
+            
+            # 처리된 작업의 결과를 현재 작업에 반영
+            if processed_tasks:
+                processed_task = processed_tasks[0]
+                task.result = processed_task.result
+                task.status = processed_task.status
+                task.error = processed_task.error
+                
+        except Exception as e:
+            task.result = {"error": str(e), "type": "embedding"}
+            raise
     
     async def _process_file_task(self, task: BatchTask):
-        """파일 처리 작업"""
-        # 실제 파일 처리 로직 구현
-        await asyncio.sleep(0.1)  # 플레이스홀더
-        task.result = {"status": "processed", "type": "file"}
+        """파일 처리 작업 실행"""
+        try:
+            data = task.data
+            file_content = data["file_content"]
+            file_name = data["file_name"]
+            project_id = data["project_id"]
+            file_id = data["file_id"]
+            
+            # FileBatchProcessor 인스턴스 사용
+            file_processor = FileBatchProcessor()
+            
+            # 대용량 파일 처리
+            chunks = await file_processor.process_large_file(
+                file_content=file_content,
+                file_name=file_name,
+                project_id=project_id,
+                file_id=file_id,
+                chunk_overlap=100
+            )
+            
+            task.result = {
+                "chunks": chunks,
+                "total_chunks": len(chunks),
+                "type": "file",
+                "processed": True
+            }
+            
+        except Exception as e:
+            task.result = {"error": str(e), "type": "file"}
+            raise
+    
+    async def _mock_embedding_function(self, texts: List[str], model: str, client=None) -> List[List[float]]:
+        """모의 임베딩 함수 (실제 구현 시 대체 필요)"""
+        # 실제 구현에서는 AI 모델을 사용한 임베딩 생성
+        import random
+        embedding_dim = 768  # 일반적인 임베딩 차원
+        
+        embeddings = []
+        for text in texts:
+            # 모의 임베딩 벡터 생성 (실제로는 AI 모델 사용)
+            embedding = [random.random() for _ in range(embedding_dim)]
+            embeddings.append(embedding)
+        
+        # 비동기 처리 시뮬레이션
+        await asyncio.sleep(0.1 * len(texts))
+        
+        return embeddings
 
 class BatchProcessingManager:
     """배치 처리 관리자"""
@@ -489,18 +534,16 @@ class BatchProcessingManager:
         self.is_initialized = False
     
     async def initialize(self):
-        """매니저 초기화"""
         if not self.is_initialized:
             await self.task_queue.start()
             self.is_initialized = True
-            batch_print("batch_manager_initialized", {})
+            logger.info("batch_manager_initialized", extra={"data": {}})
     
     async def shutdown(self):
-        """매니저 종료"""
         if self.is_initialized:
             await self.task_queue.stop()
             self.is_initialized = False
-            batch_print("batch_manager_shutdown", {})
+            logger.info("batch_manager_shutdown", extra={"data": {}})
     
     async def submit_embedding_batch(
         self,
@@ -510,8 +553,6 @@ class BatchProcessingManager:
         file_id: str,
         priority: TaskPriority = TaskPriority.NORMAL
     ) -> str:
-        """임베딩 배치 작업 제출"""
-        
         task = BatchTask(
             task_type="embedding_generation",
             data={
@@ -537,8 +578,6 @@ class BatchProcessingManager:
         file_id: str,
         priority: TaskPriority = TaskPriority.NORMAL
     ) -> str:
-        """파일 처리 배치 작업 제출"""
-        
         task = BatchTask(
             task_type="file_processing",
             data={
@@ -557,11 +596,9 @@ class BatchProcessingManager:
         return task.id
     
     async def get_batch_status(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """배치 작업 상태 조회"""
         return await self.task_queue.get_task_status(task_id)
     
     def get_queue_stats(self) -> Dict[str, Any]:
-        """큐 통계 조회"""
         return {
             "queue_size": len(self.task_queue.task_queue),
             "active_tasks": len(self.task_queue.active_tasks),
@@ -571,4 +608,4 @@ class BatchProcessingManager:
         }
 
 # 전역 배치 처리 매니저
-batch_manager = BatchProcessingManager() 
+batch_manager = BatchProcessingManager()

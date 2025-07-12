@@ -2,7 +2,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.models.anonymous_usage import AnonymousUsage
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class CRUDAnonymousUsage:
@@ -44,13 +44,40 @@ class CRUDAnonymousUsage:
         ip_address: str
     ) -> AnonymousUsage:
         """
-        사용량을 1 증가시킴
+        사용량을 1 증가시킴 (원자적 업데이트)
         """
-        usage = self.get_or_create_usage(db, session_id, ip_address)
-        usage.usage_count += 1
-        usage.updated_at = datetime.utcnow()
+        # 데이터베이스 레벨에서 원자적으로 업데이트
+        db.query(AnonymousUsage).filter(
+            and_(
+                AnonymousUsage.session_id == session_id,
+                AnonymousUsage.ip_address == ip_address
+            )
+        ).update(
+            {AnonymousUsage.usage_count: AnonymousUsage.usage_count + 1,
+             AnonymousUsage.updated_at: datetime.now(timezone.utc)},
+            synchronize_session=False
+        )
         db.commit()
-        db.refresh(usage)
+        
+        # 업데이트된 객체를 다시 로드
+        usage = db.query(AnonymousUsage).filter(
+            and_(
+                AnonymousUsage.session_id == session_id,
+                AnonymousUsage.ip_address == ip_address
+            )
+        ).first()
+        
+        if not usage:
+            # 레코드가 없으면 새로 생성 (경쟁 조건으로 인해 업데이트 실패 시)
+            usage = AnonymousUsage(
+                session_id=session_id,
+                ip_address=ip_address,
+                usage_count=1
+            )
+            db.add(usage)
+            db.commit()
+            db.refresh(usage)
+        
         return usage
     
     def check_usage_limit(
@@ -90,7 +117,7 @@ class CRUDAnonymousUsage:
             AnonymousUsage.ip_address == ip_address
         ).update({
             AnonymousUsage.usage_count: 0,
-            AnonymousUsage.updated_at: datetime.utcnow()
+            AnonymousUsage.updated_at: datetime.now(timezone.utc)
         })
         db.commit()
         return count
@@ -103,7 +130,7 @@ class CRUDAnonymousUsage:
         """
         오래된 기록 정리 (30일 이상 된 기록 삭제)
         """
-        cutoff_date = datetime.utcnow() - timedelta(days=days_old)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_old)
         count = db.query(AnonymousUsage).filter(
             AnonymousUsage.created_at < cutoff_date
         ).delete()
@@ -119,12 +146,12 @@ class CRUDAnonymousUsage:
         일별 익명 사용자 통계 조회
         """
         if date is None:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
         else:
             target_date = date.date() if isinstance(date, datetime) else date
         
         # 당일 생성된 기록들
-        start_date = datetime.combine(target_date, datetime.min.time())
+        start_date = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
         end_date = start_date + timedelta(days=1)
         
         records = db.query(AnonymousUsage).filter(

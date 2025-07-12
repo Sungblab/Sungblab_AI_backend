@@ -1,7 +1,8 @@
-from prometheus_client import Counter, Histogram, Gauge, Info, generate_latest
+from prometheus_client import Counter, Histogram, Gauge, generate_latest
+from functools import wraps
 import time
 from typing import Dict, Any
-from functools import wraps
+from app.core.config import settings
 
 # Prometheus 메트릭 정의
 REQUESTS_TOTAL = Counter(
@@ -68,6 +69,8 @@ class MetricsCollector:
     @staticmethod
     def record_request(method: str, endpoint: str, status_code: int, duration: float):
         """HTTP 요청 메트릭 기록"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         REQUESTS_TOTAL.labels(
             method=method,
             endpoint=endpoint,
@@ -84,6 +87,8 @@ class MetricsCollector:
                             input_tokens: int, output_tokens: int, 
                             response_time: float):
         """AI 상호작용 메트릭 기록"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         AI_INTERACTIONS_TOTAL.labels(
             model=model,
             user_type=user_type
@@ -104,16 +109,22 @@ class MetricsCollector:
     @staticmethod
     def record_cache_hit(cache_type: str):
         """캐시 히트 기록"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         CACHE_HITS.labels(cache_type=cache_type).inc()
     
     @staticmethod
     def record_cache_miss(cache_type: str):
         """캐시 미스 기록"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         CACHE_MISSES.labels(cache_type=cache_type).inc()
     
     @staticmethod
     def record_error(error_type: str, severity: str = "error"):
         """에러 기록"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         ERROR_RATE.labels(
             error_type=error_type,
             severity=severity
@@ -122,11 +133,15 @@ class MetricsCollector:
     @staticmethod
     def update_active_users(count: int):
         """활성 사용자 수 업데이트"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         ACTIVE_USERS.set(count)
     
     @staticmethod
     def update_db_connections(count: int):
         """DB 연결 수 업데이트"""
+        if not settings.ENABLE_PERFORMANCE_MONITORING:
+            return
         DATABASE_CONNECTIONS.set(count)
 
 # 데코레이터들
@@ -135,6 +150,8 @@ def monitor_ai_performance(model: str):
     def decorator(func):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
+            if not settings.ENABLE_PERFORMANCE_MONITORING:
+                return await func(*args, **kwargs)
             start_time = time.time()
             try:
                 result = await func(*args, **kwargs)
@@ -156,6 +173,8 @@ def monitor_ai_performance(model: str):
         
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
+            if not settings.ENABLE_PERFORMANCE_MONITORING:
+                return func(*args, **kwargs)
             start_time = time.time()
             try:
                 result = func(*args, **kwargs)
@@ -187,6 +206,8 @@ def monitor_cache_performance(cache_type: str):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            if not settings.ENABLE_PERFORMANCE_MONITORING:
+                return func(*args, **kwargs)
             result = func(*args, **kwargs)
             
             # 캐시 히트/미스 판단 (함수 구현에 따라 조정)

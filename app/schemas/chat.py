@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import validator
 from app.core.models import ALLOWED_MODELS
 
@@ -14,21 +14,19 @@ class FileInfo(BaseModel):
             datetime: lambda v: v.isoformat()
         }
 
-class ChatBase(BaseModel):
+class ChatUpdate(BaseModel):
     name: str = ""
     type: Optional[str] = None
-
-class ChatCreate(ChatBase):
-    pass
-
-class ChatUpdate(ChatBase):
-    pass
 
 class ChatRoomBase(BaseModel):
     name: str = ""
 
 class ChatRoomCreate(ChatRoomBase):
     pass
+
+class ChatCreate(BaseModel):
+    name: str = ""
+    type: Optional[str] = None
 
 class ChatRoom(ChatRoomBase):
     id: str
@@ -55,8 +53,8 @@ class ChatMessageCreate(ChatMessageBase):
 class ChatMessage(ChatMessageBase):
     id: str
     room_id: str
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         from_attributes = True
@@ -69,7 +67,7 @@ class ChatMessage(ChatMessageBase):
         if isinstance(value, datetime):
             return value
         if value is None:
-            return datetime.now()
+            return datetime.now(timezone.utc)
         return datetime.fromisoformat(str(value))
 
 class ChatMessageList(BaseModel):

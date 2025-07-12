@@ -3,10 +3,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # 시스템 패키지 설치
-RUN apt-get update && apt-get install -y \
-    netcat-traditional \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y     netcat-traditional     postgresql-client     build-essential     libpq-dev     && rm -rf /var/lib/apt/lists/*
 
 # 타임존 설정
 ENV TZ=Asia/Seoul

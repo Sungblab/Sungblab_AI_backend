@@ -1,380 +1,326 @@
+"""
+중앙 집중식 통합 캐시 관리 모듈
+
+- Redis 기반의 범용 캐시 관리자 제공
+- 인증, 성능(토큰, 임베딩, AI 응답) 등 특수 목적 캐싱 클래스 통합
+- API 응답 캐싱을 위한 데코레이터 제공
+- 캐시 무효화 및 통계 관리 기능
+"""
 import redis
 import json
 import pickle
-from typing import Any, Optional, Union
-from datetime import timedelta
 import hashlib
-from app.core.config import settings
-from functools import wraps
-import asyncio
 import time
-from typing import Optional, Dict, Any
-import json
-import hashlib
-from datetime import datetime, timedelta
+import asyncio
+from typing import Any, Optional, Union, Dict, List, Tuple, Callable
+from functools import wraps
+
+from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+# --- 기본 캐시 관리자 ---
 
 class CacheManager:
-    """통합 캐시 관리자"""
-    
+    """Redis 기반 통합 캐시 관리자"""
     def __init__(self):
-        # Redis 연결 (환경변수로 설정)
-        self.redis_client = redis.Redis.from_url(
-            settings.REDIS_URL if hasattr(settings, 'REDIS_URL') 
-            else "redis://localhost:6379",
-            decode_responses=False,  # 바이너리 데이터 지원
-            max_connections=20,  # 최대 연결 수 제한
-            retry_on_timeout=True,
-            socket_timeout=5,
-            socket_connect_timeout=5
-        )
-        self.default_ttl = 1800  # 30분으로 감소
-        self.max_cache_size = 100 * 1024 * 1024  # 100MB 제한
-    
+        try:
+            self.redis_client = redis.Redis.from_url(
+                settings.REDIS_URL, decode_responses=False, max_connections=20,
+                retry_on_timeout=True, socket_timeout=5, socket_connect_timeout=5,
+                health_check_interval=30
+            )
+            self.redis_client.ping() # 연결 테스트
+            logger.info("Redis cache connected successfully.")
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+            logger.warning(f"Could not connect to Redis: {e}. Caching will be disabled.")
+            self.redis_client = None
+        except Exception as e:
+            logger.warning(f"Unexpected Redis error: {e}. Caching will be disabled.")
+            self.redis_client = None
+        
+        self.default_ttl = 1800  # 30분
+
     def _generate_key(self, prefix: str, *args, **kwargs) -> str:
-        """캐시 키 생성"""
         key_data = f"{prefix}:{str(args)}:{str(sorted(kwargs.items()))}"
-        return hashlib.md5(key_data.encode()).hexdigest()
-    
+        return f"{prefix}:{hashlib.md5(key_data.encode()).hexdigest()}"
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """값 저장"""
+        if not self.redis_client: return False
         try:
             ttl = ttl or self.default_ttl
             serialized_value = pickle.dumps(value)
             return self.redis_client.setex(key, ttl, serialized_value)
         except Exception as e:
-            print(f"Cache set error: {e}")
+            logger.error(f"Cache set error for key '{key}': {e}")
             return False
-    
+
     def get(self, key: str) -> Optional[Any]:
-        """값 조회"""
+        if not self.redis_client: return None
         try:
             serialized_value = self.redis_client.get(key)
-            if serialized_value:
-                return pickle.loads(serialized_value)
-            return None
+            return pickle.loads(serialized_value) if serialized_value else None
         except Exception as e:
-            print(f"Cache get error: {e}")
+            logger.error(f"Cache get error for key '{key}': {e}")
             return None
-    
+
     def delete(self, key: str) -> bool:
-        """값 삭제"""
+        if not self.redis_client: return False
         try:
             return bool(self.redis_client.delete(key))
         except Exception as e:
-            print(f"Cache delete error: {e}")
+            logger.error(f"Cache delete error for key '{key}': {e}")
             return False
-    
-    def exists(self, key: str) -> bool:
-        """키 존재 여부 확인"""
-        try:
-            return bool(self.redis_client.exists(key))
-        except Exception as e:
-            print(f"Cache exists error: {e}")
-            return False
-    
+
     def clear_pattern(self, pattern: str) -> int:
-        """패턴에 맞는 키들 삭제"""
+        if not self.redis_client: return 0
         try:
-            keys = self.redis_client.keys(pattern)
+            keys = [key.decode('utf-8') for key in self.redis_client.scan_iter(match=pattern)]
             if keys:
                 return self.redis_client.delete(*keys)
             return 0
         except Exception as e:
-            print(f"Cache clear pattern error: {e}")
+            logger.error(f"Cache clear pattern error for '{pattern}': {e}")
             return 0
-    
-    def get_cache_size(self) -> int:
-        """캐시 크기 반환 (바이트)"""
+            
+    def exists(self, key: str) -> bool:
+        if not self.redis_client: return False
         try:
-            info = self.redis_client.info('memory')
-            return info.get('used_memory', 0)
+            return self.redis_client.exists(key)
         except Exception as e:
-            print(f"Cache size check error: {e}")
-            return 0
-    
-    def cleanup_expired_keys(self) -> int:
-        """만료된 키들 정리"""
-        try:
-            # Redis의 SCAN 명령으로 키들을 안전하게 조회
-            count = 0
-            cursor = 0
-            while True:
-                cursor, keys = self.redis_client.scan(cursor, count=100)
-                for key in keys:
-                    if self.redis_client.ttl(key) == -1:  # TTL이 설정되지 않은 키
-                        self.redis_client.expire(key, self.default_ttl)
-                        count += 1
-                if cursor == 0:
-                    break
-            return count
-        except Exception as e:
-            print(f"Cache cleanup error: {e}")
-            return 0
-    
-    def clear_old_cache(self, max_age_hours: int = 24) -> int:
-        """오래된 캐시 정리"""
-        try:
-            # 메모리 사용량이 한계를 넘으면 LRU 정책으로 정리
-            cache_size = self.get_cache_size()
-            if cache_size > self.max_cache_size:
-                # 가장 오래된 키들부터 삭제
-                keys = self.redis_client.keys('*')
-                # 키들을 생성 시간순으로 정렬 (근사치)
-                keys_with_ttl = []
-                for key in keys[:1000]:  # 최대 1000개만 체크
-                    ttl = self.redis_client.ttl(key)
-                    if ttl > 0:
-                        keys_with_ttl.append((key, ttl))
-                
-                # TTL이 낮은 순서대로 정렬 (곧 만료될 키들)
-                keys_with_ttl.sort(key=lambda x: x[1])
-                
-                # 메모리 사용량을 제한 이하로 줄일 때까지 삭제
-                deleted = 0
-                for key, _ in keys_with_ttl:
-                    if self.get_cache_size() <= self.max_cache_size * 0.8:
-                        break
-                    self.redis_client.delete(key)
-                    deleted += 1
-                
-                return deleted
-            return 0
-        except Exception as e:
-            print(f"Old cache cleanup error: {e}")
-            return 0
+            logger.error(f"Cache exists error for key '{key}': {e}")
+            return False
 
-# 전역 캐시 매니저
+# 전역 캐시 매니저 인스턴스
 cache_manager = CacheManager()
 
-# 캐시 데코레이터들
-def cache_response(ttl: int = 3600, key_prefix: str = "api"):
-    """API 응답 캐싱 데코레이터"""
-    def decorator(func):
+# --- 성능 모니터링 데코레이터 ---
+
+def monitor_cache_performance(operation: str):
+    def decorator(func: Callable):
         @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            # 캐시 키 생성
-            cache_key = cache_manager._generate_key(
-                f"{key_prefix}:{func.__name__}", 
-                *args, **kwargs
-            )
-            
-            # 캐시에서 조회
-            cached_result = cache_manager.get(cache_key)
-            if cached_result is not None:
-                return cached_result
-            
-            # 함수 실행
-            result = await func(*args, **kwargs)
-            
-            # 결과 캐싱
-            cache_manager.set(cache_key, result, ttl)
-            
-            return result
-        
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            # 캐시 키 생성
-            cache_key = cache_manager._generate_key(
-                f"{key_prefix}:{func.__name__}", 
-                *args, **kwargs
-            )
-            
-            # 캐시에서 조회
-            cached_result = cache_manager.get(cache_key)
-            if cached_result is not None:
-                return cached_result
-            
-            # 함수 실행
-            result = func(*args, **kwargs)
-            
-            # 결과 캐싱
-            cache_manager.set(cache_key, result, ttl)
-            
-            return result
-        
-        # 비동기 함수인지 확인
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        else:
-            return sync_wrapper
-    
+        async def wrapper(*args, **kwargs):
+            start_time = time.time()
+            cache_hit = False
+            success = True
+            try:
+                # 캐시 히트 여부를 확인하기 위한 로직 (함수 구현에 따라 달라질 수 있음)
+                # 여기서는 간단히 kwargs에서 cache_hit를 전달받는다고 가정
+                if 'cache_hit' in kwargs:
+                    cache_hit = kwargs.pop('cache_hit')
+
+                result = await func(*args, **kwargs)
+                return result
+            except Exception as e:
+                success = False
+                logger.error(f"Error during {operation}: {e}")
+                raise
+            finally:
+                duration = time.time() - start_time
+                logger.info(
+                    "performance_metric",
+                    extra={
+                        "data": {
+                            "operation": operation,
+                            "duration": duration,
+                            "success": success,
+                            "cache_hit": cache_hit,
+                        }
+                    },
+                )
+        return wrapper
     return decorator
 
-def cache_user_data(ttl: int = 1800):  # 30분
-    """사용자 데이터 캐싱"""
-    return cache_response(ttl=ttl, key_prefix="user")
+# --- API 응답 캐싱 데코레이터 ---
 
-def cache_project_data(ttl: int = 3600):  # 1시간
-    """프로젝트 데이터 캐싱"""
-    return cache_response(ttl=ttl, key_prefix="project")
-
-def cache_ai_response(ttl: int = 86400):  # 24시간
-    """AI 응답 캐싱 (동일한 질문에 대한 응답)"""
-    return cache_response(ttl=ttl, key_prefix="ai_response")
-
-def cache_embedding(ttl: int = 604800):  # 7일
-    """임베딩 결과 캐싱"""
-    return cache_response(ttl=ttl, key_prefix="embedding")
-
-# 캐시 무효화 유틸리티
-class CacheInvalidator:
-    """캐시 무효화 관리"""
-    
-    @staticmethod
-    def invalidate_user_cache(user_id: str):
-        """사용자 캐시 무효화"""
-        pattern = f"user:*{user_id}*"
-        return cache_manager.clear_pattern(pattern)
-    
-    @staticmethod
-    def invalidate_project_cache(project_id: str):
-        """프로젝트 캐시 무효화"""
-        pattern = f"project:*{project_id}*"
-        return cache_manager.clear_pattern(pattern)
-    
-    @staticmethod
-    def invalidate_all_cache():
-        """모든 캐시 무효화 (주의해서 사용)"""
-        return cache_manager.clear_pattern("*")
-
-# 사용 예시:
-# @cache_user_data(ttl=1800)
-# def get_user_profile(user_id: str):
-#     return user_data
-#
-# @cache_ai_response(ttl=86400)
-# async def generate_ai_response(prompt: str, model: str):
-#     return ai_response
-
-# 임베딩 캐시 특수 처리
-class EmbeddingCache:
-    """임베딩 전용 캐시"""
-    
-    @staticmethod
-    def get_embedding_key(text: str, model: str) -> str:
-        """임베딩 캐시 키 생성"""
-        text_hash = hashlib.sha256(text.encode()).hexdigest()
-        return f"embedding:{model}:{text_hash}"
-    
-    @staticmethod
-    def cache_embedding(text: str, model: str, embedding: list, ttl: int = 604800):
-        """임베딩 캐싱"""
-        key = EmbeddingCache.get_embedding_key(text, model)
-        return cache_manager.set(key, {
-            "embedding": embedding,
-            "model": model,
-            "text_length": len(text)
-        }, ttl)
-    
-    @staticmethod
-    def get_cached_embedding(text: str, model: str) -> Optional[list]:
-        """캐시된 임베딩 조회"""
-        key = EmbeddingCache.get_embedding_key(text, model)
-        result = cache_manager.get(key)
-        return result["embedding"] if result else None
-
-# 벡터 검색 결과 캐시
-class VectorSearchCache:
-    """벡터 검색 결과 캐시"""
-    
-    @staticmethod
-    def get_search_key(project_id: str, query_hash: str, top_k: int, threshold: float) -> str:
-        """검색 캐시 키 생성"""
-        return f"vector_search:{project_id}:{query_hash}:{top_k}:{threshold}"
-    
-    @staticmethod
-    def cache_search_result(project_id: str, query: str, top_k: int, 
-                          threshold: float, results: list, ttl: int = 3600):
-        """검색 결과 캐싱"""
-        query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
-        key = VectorSearchCache.get_search_key(project_id, query_hash, top_k, threshold)
-        return cache_manager.set(key, results, ttl)
-    
-    @staticmethod
-    def get_cached_search_result(project_id: str, query: str, 
-                               top_k: int, threshold: float) -> Optional[list]:
-        """캐시된 검색 결과 조회"""
-        query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
-        key = VectorSearchCache.get_search_key(project_id, query_hash, top_k, threshold)
-        return cache_manager.get(key) 
-
-class SimpleCache:
-    def __init__(self, default_ttl: int = 300):  # 5분 기본 TTL
-        self._cache: Dict[str, Dict[str, Any]] = {}
-        self._default_ttl = default_ttl
-    
-    def _generate_key(self, prefix: str, data: Any) -> str:
-        """데이터 기반 캐시 키 생성"""
-        if isinstance(data, dict):
-            data_str = json.dumps(data, sort_keys=True)
-        else:
-            data_str = str(data)
-        return f"{prefix}:{hashlib.md5(data_str.encode()).hexdigest()}"
-    
-    def get(self, key: str) -> Optional[Any]:
-        """캐시에서 값 조회"""
-        if key in self._cache:
-            item = self._cache[key]
-            if time.time() < item['expires_at']:
-                return item['value']
-            else:
-                del self._cache[key]
-        return None
-    
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """캐시에 값 저장"""
-        ttl = ttl or self._default_ttl
-        self._cache[key] = {
-            'value': value,
-            'expires_at': time.time() + ttl,
-            'created_at': time.time()
-        }
-    
-    def delete(self, key: str) -> bool:
-        """캐시에서 키 삭제"""
-        if key in self._cache:
-            del self._cache[key]
-            return True
-        return False
-    
-    def clear(self) -> None:
-        """전체 캐시 삭제"""
-        self._cache.clear()
-    
-    def cleanup_expired(self) -> None:
-        """만료된 캐시 정리"""
-        current_time = time.time()
-        expired_keys = [
-            key for key, item in self._cache.items()
-            if current_time >= item['expires_at']
-        ]
-        for key in expired_keys:
-            del self._cache[key]
-
-# 전역 캐시 인스턴스
-cache = SimpleCache(default_ttl=300)  # 5분
-
-# 캐시 데코레이터
-def cached(ttl: int = 300, prefix: str = "api"):
+def cache_response(ttl: int = 3600, key_prefix: str = "api"):
     def decorator(func):
-        def wrapper(*args, **kwargs):
-            # 캐시 키 생성
-            cache_key = cache._generate_key(prefix, {
-                'func': func.__name__,
-                'args': args,
-                'kwargs': kwargs
-            })
-            
-            # 캐시에서 조회
-            cached_result = cache.get(cache_key)
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            cache_key = cache_manager._generate_key(f"{key_prefix}:{func.__name__}", *args, **kwargs)
+            cached_result = cache_manager.get(cache_key)
             if cached_result is not None:
                 return cached_result
             
-            # 캐시 미스 시 함수 실행
-            result = func(*args, **kwargs)
-            
-            # 결과 캐싱
-            cache.set(cache_key, result, ttl)
+            result = await func(*args, **kwargs)
+            cache_manager.set(cache_key, result, ttl)
             return result
         return wrapper
-    return decorator 
+    return decorator
+
+# --- 특수 목적 캐시 클래스들 ---
+
+class AuthCache:
+    """인증 정보 캐싱 시스템"""
+    def __init__(self, cache: CacheManager):
+        self.cache = cache
+        self.cache_ttl = 300  # 5분
+        self.cache_prefix = "auth_user:"
+
+    def get_cached_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        key = f"{self.cache_prefix}{user_id}"
+        return self.cache.get(key)
+
+    def cache_user(self, user_id: str, user_data: Dict[str, Any]):
+        key = f"{self.cache_prefix}{user_id}"
+        self.cache.set(key, user_data, self.cache_ttl)
+
+    def invalidate_user_cache(self, user_id: str):
+        key = f"{self.cache_prefix}{user_id}"
+        self.cache.delete(key)
+
+class EmbeddingCache:
+    """임베딩 전용 고성능 캐시"""
+    PREFIX = "embedding_v2"
+    DEFAULT_TTL = 604800  # 7일
+
+    def __init__(self, cache: CacheManager):
+        self.cache = cache
+
+    def _get_key(self, text: str, model: str) -> str:
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
+        return f"{self.PREFIX}:{model}:{text_hash[:20]}"
+
+    def get(self, text: str, model: str) -> Optional[List[float]]:
+        key = self._get_key(text, model)
+        cached = self.cache.get(key)
+        return cached.get("embedding") if cached else None
+
+    def set(self, text: str, model: str, embedding: List[float]):
+        key = self._get_key(text, model)
+        cache_data = {
+            "embedding": embedding,
+            "model": model,
+            "text_length": len(text),
+            "created_at": time.time()
+        }
+        self.cache.set(key, cache_data, self.DEFAULT_TTL)
+
+class ResponseCache:
+    """AI 응답 캐싱"""
+    PREFIX = "ai_response_v2"
+    DEFAULT_TTL = 3600 # 1시간
+
+    def __init__(self, cache: CacheManager):
+        self.cache = cache
+
+    def _get_key(self, messages: List[Dict[str, str]], model: str, system_prompt: Optional[str] = None) -> str:
+        content = {"messages": messages, "model": model, "system_prompt": system_prompt}
+        content_str = json.dumps(content, sort_keys=True)
+        content_hash = hashlib.sha256(content_str.encode()).hexdigest()
+        return f"{self.PREFIX}:{content_hash[:20]}"
+
+    def get(self, messages: List[Dict[str, str]], model: str, system_prompt: Optional[str] = None) -> Optional[str]:
+        key = self._get_key(messages, model, system_prompt)
+        cached = self.cache.get(key)
+        return cached.get("response") if cached else None
+
+    def set(self, messages: List[Dict[str, str]], model: str, response: str, system_prompt: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None):
+        key = self._get_key(messages, model, system_prompt)
+        cache_data = {
+            "response": response,
+            "model": model,
+            "message_count": len(messages),
+            "response_length": len(response),
+            "created_at": time.time(),
+            "metadata": metadata or {}
+        }
+        self.cache.set(key, cache_data, self.DEFAULT_TTL)
+
+class TokenCache:
+    """토큰 계산 결과 캐싱"""
+    PREFIX = "token_cache"
+    DEFAULT_TTL = 86400 # 24시간
+
+    def __init__(self, cache: CacheManager):
+        self.cache = cache
+
+    def _get_key(self, text: str, model: str) -> str:
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
+        return f"{self.PREFIX}:{model}:{text_hash[:20]}"
+
+    def get(self, text: str, model: str) -> Optional[Dict[str, int]]:
+        key = self._get_key(text, model)
+        return self.cache.get(key)
+
+    def set(self, text: str, model: str, token_counts: Dict[str, int]):
+        key = self._get_key(text, model)
+        self.cache.set(key, token_counts, self.DEFAULT_TTL)
+
+class DatabaseCache:
+    """데이터베이스 쿼리 결과 캐싱"""
+    PREFIX = "db_query"
+    DEFAULT_TTL = 300 # 5분
+
+    def __init__(self, cache: CacheManager):
+        self.cache = cache
+
+    def _get_key(self, query_type: str, **kwargs) -> str:
+        key_parts = [f"{k}:{v}" for k, v in sorted(kwargs.items())]
+        return f"{self.PREFIX}:{query_type}:{':'.join(key_parts)}"
+
+    def get(self, query_type: str, **kwargs) -> Optional[Any]:
+        key = self._get_key(query_type, **kwargs)
+        return self.cache.get(key)
+
+    def set(self, query_type: str, result: Any, ttl: Optional[int] = None, **kwargs):
+        key = self._get_key(query_type, **kwargs)
+        self.cache.set(key, result, ttl or self.DEFAULT_TTL)
+
+# --- 캐시 통계 및 관리 ---
+
+class CacheStats:
+    """캐시 통계 조회"""
+    @staticmethod
+    def get_cache_stats() -> Dict[str, Any]:
+        if not cache_manager.redis_client:
+            return {"status": "disabled"}
+        try:
+            redis_info = cache_manager.redis_client.info()
+            keyspace_info = redis_info.get('db0', {})
+            
+            return {
+                "redis_version": redis_info.get("redis_version"),
+                "uptime_in_seconds": redis_info.get("uptime_in_seconds"),
+                "connected_clients": redis_info.get("connected_clients"),
+                "used_memory_human": redis_info.get("used_memory_human"),
+                "total_keys": keyspace_info.get("keys"),
+                "expires": keyspace_info.get("expires"),
+                "hit_rate": (redis_info['keyspace_hits'] / (redis_info['keyspace_hits'] + redis_info['keyspace_misses'])) if (redis_info['keyspace_hits'] + redis_info['keyspace_misses']) > 0 else 0,
+            }
+        except Exception as e:
+            logger.error(f"Could not get Redis stats: {e}")
+            return {"error": str(e)}
+
+class CacheInvalidator:
+    """캐시 무효화 유틸리티"""
+    @staticmethod
+    def invalidate_user_cache(user_id: str):
+        logger.info(f"Invalidating cache for user: {user_id}")
+        auth_cache.invalidate_user_cache(user_id)
+        cache_manager.clear_pattern(f"api:get_projects_for_user*:{user_id}*")
+
+    @staticmethod
+    def invalidate_project_cache(project_id: str):
+        logger.info(f"Invalidating cache for project: {project_id}")
+        cache_manager.clear_pattern(f"*:*{project_id}*")
+        
+    @staticmethod
+    def invalidate_room_cache(room_id: str):
+        logger.info(f"Invalidating cache for room: {room_id}")
+        db_cache.cache.clear_pattern(f"{DatabaseCache.PREFIX}:room_messages:*{room_id}*")
+
+    @staticmethod
+    def invalidate_all_cache():
+        logger.warning("Clearing all application cache.")
+        if cache_manager.redis_client:
+            cache_manager.redis_client.flushdb()
+
+# --- 전역 특수 캐시 인스턴스 --- 
+auth_cache = AuthCache(cache_manager)
+embedding_cache = EmbeddingCache(cache_manager)
+response_cache = ResponseCache(cache_manager)
+token_cache = TokenCache(cache_manager)
+db_cache = DatabaseCache(cache_manager)
+cache_invalidator = CacheInvalidator()

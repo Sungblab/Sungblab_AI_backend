@@ -5,12 +5,10 @@ from app.api.api_v1.api import api_router
 from app.db.init_db import init_db
 from app.core.error_handlers import setup_error_handlers, ErrorMonitoringMiddleware
 from app.core.error_tracking import init_sentry
-# from app.core.structured_logging import StructuredLogger  # 사용 안 함
-from app.middleware.performance import PerformanceMonitoringMiddleware
-from app.core.memory_manager import memory_manager
-from app.core.health_monitor import health_monitor
 from app.core.logging_config import init_logging
 from app.core.scheduled_tasks import scheduled_tasks
+from app.core.health_monitor import health_monitor
+from app.core.memory_manager import memory_manager
 import logging
 import pytz
 from datetime import datetime
@@ -21,15 +19,7 @@ os.environ['TZ'] = 'Asia/Seoul'
 KST = pytz.timezone('Asia/Seoul')
 datetime.now(KST)  # 시스템 전체 시간대 설정
 
-# 로깅 설정
-logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-logging.getLogger("uvicorn.error").setLevel(logging.INFO)
-logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
-logging.getLogger("alembic").setLevel(logging.INFO)
-
-# 간단한 로깅 초기화
-logger = logging.getLogger("sungblab_api")
-logger.setLevel(settings.LOG_LEVEL)
+logger = logging.getLogger(__name__)
 
 # OpenAPI 메타데이터 설정
 description = """
@@ -121,6 +111,7 @@ setup_error_handlers(app)
 
 # 성능 모니터링 미들웨어 추가 (선택적)
 if settings.ENABLE_PERFORMANCE_MONITORING:
+    from app.middleware.performance import PerformanceMonitoringMiddleware
     app.add_middleware(PerformanceMonitoringMiddleware, slow_request_threshold=2.0)
 
 # 에러 모니터링 미들웨어 추가
@@ -150,6 +141,14 @@ async def startup_event():
     try:
         init_db()
         
+        # 데이터베이스 최적화 적용
+        try:
+            from app.core.db_optimization import db_optimizer
+            db_optimizer.optimize_database_settings()
+            logger.info("✅ 데이터베이스 최적화 설정 완료")
+        except Exception as e:
+            logger.warning(f"⚠️  데이터베이스 최적화 실패: {e}")
+        
         # 메모리 관리자 시작 (선택적)
         if settings.ENABLE_MEMORY_MANAGER:
             memory_manager.start()
@@ -164,17 +163,15 @@ async def startup_event():
             # 시작 시 로그 정리 실행
             scheduled_tasks.force_cleanup_logs()
         
-        print("SungbLab API server started successfully (minimal mode)")
+        logger.info("SungbLab API server started successfully (optimized mode)")
         
     except Exception as e:
-        print(f"Warning: Application started with limited functionality - {e}")
+        logger.critical(f"Warning: Application started with limited functionality - {e}", exc_info=True)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """애플리케이션 종료 시 정리 작업"""
-    # 메모리 관리자 중지 (선택적)
-    if settings.ENABLE_MEMORY_MANAGER:
-        memory_manager.stop()
+    
     
     # 헬스 모니터 중지 (선택적)
     if settings.ENABLE_HEALTH_MONITOR:
@@ -184,7 +181,7 @@ async def shutdown_event():
     if settings.ENABLE_SCHEDULED_TASKS:
         scheduled_tasks.stop()
     
-    print("SungbLab API server stopped")
+    logger.info("SungbLab API server stopped")
 
 app.include_router(api_router, prefix=settings.API_V1_STR.strip())
 
@@ -195,7 +192,7 @@ def read_root():
     
     API 서버가 정상적으로 실행 중인지 확인하는 엔드포인트입니다.
     """
-    print("Root endpoint accessed")
+    logger.info("Root endpoint accessed")
     return {
         "message": "Welcome to SungbLab AI API",
         "version": settings.VERSION,
