@@ -31,31 +31,9 @@ services:
       - DEBUG=true
       - REDIS_URL=${REDIS_URL}
     command: ./start.sh
-    depends_on:
-      - redis
-<<<<<<< HEAD
     networks:
       - app-network
-=======
->>>>>>> 596f78f87a33975abd4fee8708e90b8d9802d4a8
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-<<<<<<< HEAD
-    networks:
-      - app-network
-
-volumes:
-  redis_data:
 
 networks:
   app-network:
     driver: bridge
-=======
-
-volumes:
-  redis_data:
->>>>>>> 596f78f87a33975abd4fee8708e90b8d9802d4a8

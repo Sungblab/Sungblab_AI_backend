@@ -28,18 +28,27 @@ if [ $counter -eq $max_retries ]; then
     exit 1
 fi
 
-# Redis 연결 대기
+# Redis 연결 대기 (클라우드 타입 환경)
 echo "Waiting for Redis..."
 redis_counter=0
 redis_max_retries=30
 
+# REDIS_URL에서 호스트와 포트 추출
+REDIS_HOST=$(echo "$REDIS_URL" | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
+REDIS_PORT=$(echo "$REDIS_URL" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p')
+
+# 기본값 설정
+REDIS_HOST=${REDIS_HOST:-"localhost"}
+REDIS_PORT=${REDIS_PORT:-"6379"}
+
 while [ $redis_counter -lt $redis_max_retries ]
 do
-    if redis-cli -h redis -p 6379 ping > /dev/null 2>&1; then
+    if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping > /dev/null 2>&1; then
         echo "Redis is ready!"
         break
     fi
     echo "Waiting for Redis... Attempt $((redis_counter+1))/$redis_max_retries"
+    echo "Trying to connect to Redis at $REDIS_HOST:$REDIS_PORT"
     redis_counter=$((redis_counter+1))
     sleep 2
 done
