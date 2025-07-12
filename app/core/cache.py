@@ -28,7 +28,6 @@ class CacheManager:
         try:
             self.redis_client = redis.Redis.from_url(
                 settings.REDIS_URL, decode_responses=False, max_connections=20,
-<<<<<<< HEAD
                 retry_on_timeout=True, socket_timeout=5, socket_connect_timeout=5,
                 health_check_interval=30
             )
@@ -39,14 +38,6 @@ class CacheManager:
             self.redis_client = None
         except Exception as e:
             logger.warning(f"Unexpected Redis error: {e}. Caching will be disabled.")
-=======
-                retry_on_timeout=True, socket_timeout=5, socket_connect_timeout=5
-            )
-            self.redis_client.ping() # 연결 테스트
-            logger.info("Redis cache connected successfully.")
-        except redis.exceptions.ConnectionError as e:
-            logger.error(f"Could not connect to Redis: {e}. Caching will be disabled.")
->>>>>>> 596f78f87a33975abd4fee8708e90b8d9802d4a8
             self.redis_client = None
         
         self.default_ttl = 1800  # 30분
