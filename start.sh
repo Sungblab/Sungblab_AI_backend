@@ -45,12 +45,23 @@ while [ $redis_counter -lt $redis_max_retries ]
 do
     echo "Attempting Redis connection to $REDIS_HOST:$REDIS_PORT (Attempt $((redis_counter+1))/$redis_max_retries)"
     
-    # Redis 연결 테스트 (더 자세한 출력)
-    if redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>&1 | grep -q "PONG"; then
+    # Python을 사용해서 Redis 연결 테스트
+    if python -c "
+import redis
+import sys
+try:
+    r = redis.Redis(host='$REDIS_HOST', port=$REDIS_PORT, socket_timeout=5)
+    r.ping()
+    print('PONG')
+    sys.exit(0)
+except Exception as e:
+    print(f'Redis connection failed: {e}')
+    sys.exit(1)
+" 2>/dev/null | grep -q "PONG"; then
         echo "Redis is ready!"
         break
     else
-        echo "Redis connection failed. Error: $(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>&1)"
+        echo "Redis connection failed. Retrying..."
     fi
     
     redis_counter=$((redis_counter+1))
