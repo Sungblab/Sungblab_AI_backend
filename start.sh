@@ -84,4 +84,4 @@ fi
 
 # FastAPI 애플리케이션 시작 (워커 수 줄이기)
 echo "Starting FastAPI application..."
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning 
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level warning --timeout-keep-alive 120 --timeout-graceful-shutdown 30 
