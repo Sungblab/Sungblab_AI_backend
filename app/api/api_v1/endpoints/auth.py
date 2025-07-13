@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Body, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -119,7 +119,6 @@ def login(
     refresh_token = security.create_refresh_token(user.id)
     
     # 사용자에게 refresh token 저장
-    from datetime import timedelta
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
     
@@ -185,7 +184,6 @@ def login_json(
     refresh_token = security.create_refresh_token(user.id)
     
     # 사용자에게 refresh token 저장
-    from datetime import timedelta
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
     
@@ -321,7 +319,6 @@ async def google_auth(
         refresh_token = security.create_refresh_token(user.id)
         
         # 사용자에게 refresh token 저장
-        from datetime import timedelta
         refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
 
@@ -420,7 +417,6 @@ def refresh_token(
         )
     
     # Refresh token 만료 확인
-    from datetime import datetime, timezone
     if user.refresh_token_expires and datetime.now(timezone.utc) > user.refresh_token_expires:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
