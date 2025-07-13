@@ -34,4 +34,16 @@ def current_health_metrics():
     return {
         "current_metrics": health_monitor.get_current_metrics(),
         "timestamp": datetime.now(KST).isoformat()
+    }
+
+@router.get("/health/metrics", tags=["health"])
+def health_metrics():
+    """
+    헬스 메트릭 엔드포인트
+    
+    시스템의 헬스 메트릭을 반환합니다.
+    """
+    return {
+        "metrics": health_monitor.get_current_metrics(),
+        "timestamp": datetime.now(KST).isoformat()
     } 
