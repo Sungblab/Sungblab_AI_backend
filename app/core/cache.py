@@ -26,6 +26,7 @@ class CacheManager:
     """Redis 기반 통합 캐시 관리자"""
     def __init__(self):
         try:
+            logger.info(f"Attempting to connect to Redis: {settings.REDIS_URL}")
             self.redis_client = redis.Redis.from_url(
                 settings.REDIS_URL, decode_responses=False, max_connections=20,
                 retry_on_timeout=True, socket_timeout=5, socket_connect_timeout=5,
@@ -35,9 +36,11 @@ class CacheManager:
             logger.info("Redis cache connected successfully.")
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
             logger.warning(f"Could not connect to Redis: {e}. Caching will be disabled.")
+            logger.warning(f"Redis URL used: {settings.REDIS_URL}")
             self.redis_client = None
         except Exception as e:
             logger.warning(f"Unexpected Redis error: {e}. Caching will be disabled.")
+            logger.warning(f"Redis URL used: {settings.REDIS_URL}")
             self.redis_client = None
         
         self.default_ttl = 1800  # 30분

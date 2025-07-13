@@ -11,9 +11,12 @@ from fastapi import HTTPException
 
 def create_chat_room(db: Session, room: ChatRoomCreate, user_id: str) -> ChatRoom:
     try:
+        # name이 비어있거나 None인 경우 기본값 설정
+        room_name = room.name if room.name and room.name.strip() else "새 채팅"
+        
         # ChatRoomCreate 스키마를 ChatRoom 모델로 변환
         db_room = ChatRoom(
-            name=room.name,
+            name=room_name,
             user_id=user_id,  # 사용자 ID 추가
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)

@@ -406,23 +406,120 @@ def get_gemini_client():
         logger.error(f"Gemini client creation error: {e}", exc_info=True)
         return None
 
-async def count_gemini_tokens(text: str, model: str, client) -> dict:
-    """정확한 Gemini 모델의 토큰 수를 계산합니다."""
+def count_tokens_with_tiktoken(text: str, model: str = "gpt-4") -> dict:
+    """tiktoken을 사용한 정확한 토큰 계산"""
+    import tiktoken
+    
     try:
-        result = client.models.count_tokens(
-            model=model,
-            contents=text
-        )
+        # Gemini 모델은 OpenAI와 다른 토크나이저를 사용하지만, 
+        # tiktoken의 cl100k_base는 비교적 정확한 추정을 제공
+        if "gemini" in model.lower():
+            # Gemini용으로 cl100k_base 사용 (GPT-4와 유사한 토큰화)
+            encoding_name = "cl100k_base"
+        else:
+            # 기타 모델용 기본값
+            encoding_name = "cl100k_base"
+            
+        encoding = tiktoken.get_encoding(encoding_name)
+        token_count = len(encoding.encode(text))
+        
         return {
-            "input_tokens": result.total_tokens,
-            "output_tokens": 0
+            "input_tokens": token_count,
+            "output_tokens": 0,
+            "method": "tiktoken",
+            "encoding": encoding_name
         }
     except Exception as e:
-        logger.error(f"Gemini token counting error: {e}", exc_info=True)
-        return {
-            "input_tokens": len(text) // 4,  # 대략적인 토큰 계산
-            "output_tokens": 0
-        }
+        logger.warning(f"tiktoken calculation failed: {e}, using fallback")
+        return fallback_token_calculation(text)
+
+def fallback_token_calculation(text: str) -> dict:
+    """tiktoken 실패 시 fallback 계산"""
+    import re
+    
+    # 한국어/영어 혼합 텍스트 정확한 추정
+    korean_chars = len(re.findall(r'[가-힣]', text))
+    english_chars = len(re.findall(r'[a-zA-Z]', text))
+    numbers_symbols = len(re.findall(r'[0-9\s\.,;:!?\-\(\)\[\]{}]', text))
+    other_chars = len(text) - korean_chars - english_chars - numbers_symbols
+    
+    # 한국어 1.3자/토큰, 영어 3.5자/토큰 (tiktoken 기준 조정)
+    estimated_tokens = (
+        korean_chars / 1.3 + 
+        english_chars / 3.5 + 
+        numbers_symbols / 2.5 + 
+        other_chars / 2
+    )
+    
+    return {
+        "input_tokens": max(1, int(estimated_tokens)),
+        "output_tokens": 0,
+        "method": "fallback",
+        "encoding": "estimated"
+    }
+
+# 최신 Gemini 모델 컨텍스트 한도 설정 (chat.py와 동일)
+MODEL_CONTEXT_LIMITS = {
+    "gemini-2.5-pro": {
+        "total_tokens": 2_000_000,  # 2M 토큰
+        "output_reserve": 4096,     # 출력용 예약
+        "system_reserve": 2048,     # 시스템 프롬프트용 예약
+        "file_reserve": 10000       # 파일용 예약
+    },
+    "gemini-2.5-flash": {
+        "total_tokens": 1_000_000,  # 1M 토큰
+        "output_reserve": 2048,     # 출력용 예약
+        "system_reserve": 1024,     # 시스템 프롬프트용 예약
+        "file_reserve": 5000        # 파일용 예약
+    },
+    "gemini-2.0-flash": {
+        "total_tokens": 1_000_000,
+        "output_reserve": 2048,
+        "system_reserve": 1024,
+        "file_reserve": 5000
+    },
+    "gemini-1.5-pro": {
+        "total_tokens": 2_000_000,
+        "output_reserve": 4096,
+        "system_reserve": 2048,
+        "file_reserve": 10000
+    },
+    "gemini-1.5-flash": {
+        "total_tokens": 1_000_000,
+        "output_reserve": 2048,
+        "system_reserve": 1024,
+        "file_reserve": 5000
+    }
+}
+
+def get_dynamic_context_limit(model: str, system_tokens: int = 0, file_tokens: int = 0) -> int:
+    """모델별 동적 컨텍스트 한도 계산 (최신 API 기준)"""
+    # 기본값 설정 (호환성을 위해)
+    default_config = {
+        "total_tokens": 1_000_000,
+        "output_reserve": 2048,
+        "system_reserve": 1024,
+        "file_reserve": 5000
+    }
+    
+    config = MODEL_CONTEXT_LIMITS.get(model, default_config)
+    
+    # 사용 가능한 컨텍스트 계산
+    available_tokens = (
+        config["total_tokens"] 
+        - config["output_reserve"] 
+        - system_tokens 
+        - file_tokens
+    )
+    
+    # 최소 한도 보장 (너무 작으면 기본값 사용)
+    min_context = 10000
+    if available_tokens < min_context:
+        logger.warning(f"Calculated context too small ({available_tokens}), using minimum: {min_context}")
+        return min_context
+    
+    logger.info(f"Dynamic context limit for {model}: {available_tokens} tokens")
+    return available_tokens
 
 async def get_optimized_project_thinking_config(
     model: str, 
@@ -467,7 +564,7 @@ async def compress_project_context_if_needed(
     # 토큰 수 계산
     total_tokens = 0
     for msg in messages:
-        token_count = await count_gemini_tokens(msg["content"], model, client)
+        token_count = count_tokens_with_tiktoken(msg["content"], model)
         total_tokens += token_count.get("input_tokens", 0)
     
     # 압축이 필요한지 확인
@@ -621,8 +718,6 @@ async def generate_gemini_stream_response(
                             for i, result in enumerate(similar_embeddings):
                                 logger.info(f"  [{i+1}] 유사도: {result['similarity']:.3f}, 파일: {result['file_name']}, 내용: {result['content'][:50]}...")
                         else:
-                            # 더 자세한 디버깅 정보 출력
-                            logger.warning("❌ 임베딩 검색 결과 없음")
                             # 전체 임베딩 개수 확인
                             all_embeddings = crud_embedding.get_by_project(db, project_id)
                             logger.debug(f"   전체 임베딩 개수: {len(all_embeddings)}")
@@ -649,38 +744,41 @@ async def generate_gemini_stream_response(
 
         # 토큰 기반 컨텍스트 관리 (chat.py 방식 적용)
         # 프로젝트는 더 큰 컨텍스트 허용 (일반 채팅보다 2배)
-        MAX_CONTEXT_TOKENS = 128000 - 8192  # 출력을 위한 8192 토큰 예약
+        # 프로젝트 컨텍스트 관리 - 동적 한도 계산
+        # 시스템 프롬프트 토큰 먼저 계산
+        system_tokens = 0
+        if system_prompt:
+            system_token_info = count_tokens_with_tiktoken(system_prompt, model)
+            system_tokens = system_token_info.get("input_tokens", 0)
+        
+        # 파일 토큰 계산 (최신 API 기준)
+        file_tokens = 0
+        if file_data_list and file_types:
+            for file_type in file_types:
+                if file_type.startswith("image/"):
+                    file_tokens += 258  # Gemini 2.5 기준: 이미지당 258 토큰
+                elif file_type == "application/pdf":
+                    file_tokens += 258 * 10  # 예상 페이지 수 * 258 토큰
+                elif file_type.startswith("video/"):
+                    file_tokens += 263 * 60  # 예상 1분 * 263 토큰/초
+                elif file_type.startswith("audio/"):
+                    file_tokens += 32 * 60   # 예상 1분 * 32 토큰/초
+        
+        # 동적 컨텍스트 한도 계산 (최신 API 기준)
+        MAX_CONTEXT_TOKENS = get_dynamic_context_limit(model, system_tokens, file_tokens)
         
         # 메시지를 역순으로 처리하여 최근 메시지부터 포함
         valid_messages = []
-        total_tokens = 0
-        
-        # 시스템 프롬프트 토큰 계산
-        if system_prompt:
-            system_tokens = await count_gemini_tokens(system_prompt, model, client)
-            total_tokens += system_tokens.get("input_tokens", 0)
-        
-        # 파일 토큰 계산 (있는 경우)
-        file_tokens = 0
-        if file_data_list and file_types:
-            # 이미지는 타일당 258 토큰, PDF는 페이지당 258 토큰
-            for file_type in file_types:
-                if file_type.startswith("image/"):
-                    file_tokens += 258  # Gemini 2.5 기준
-                elif file_type == "application/pdf":
-                    file_tokens += 258 * 10  # 예상 페이지 수
-        
-        total_tokens += file_tokens
+        total_tokens = system_tokens + file_tokens  # 이미 계산된 시스템 + 파일 토큰 사용
         
         # 메시지를 역순으로 검토하면서 토큰 예산 내에서 포함
         for i in range(len(messages) - 1, -1, -1):
             msg = messages[i]
             if msg.get("content") and msg["content"].strip():
-                # 메시지 토큰 계산
-                msg_tokens = await count_gemini_tokens(
+                # 메시지 토큰 계산 (개선된 함수 사용)
+                msg_tokens = count_tokens_with_tiktoken(
                     f"{msg['role']}: {msg['content']}", 
-                    model, 
-                    client
+                    model
                 )
                 msg_token_count = msg_tokens.get("input_tokens", 0)
                 
@@ -729,7 +827,7 @@ async def generate_gemini_stream_response(
                 client=client,
                 model=model,
                 messages=valid_messages,
-                max_tokens=PROJECT_MAX_CONTEXT_TOKENS,
+                max_tokens=MAX_CONTEXT_TOKENS,
                 project_type=project_type or "general"
             )
 
@@ -821,7 +919,7 @@ async def generate_gemini_stream_response(
         thinking_buffer = ProjectStreamingBuffer(PROJECT_STREAMING_BUFFER_SIZE // 2)
 
         # 입력 토큰 계산
-        input_token_count = await count_gemini_tokens(conversation_text, model, client)
+        input_token_count = count_tokens_with_tiktoken(conversation_text, model)
         input_tokens = input_token_count.get("input_tokens", 0)
 
         # 스트리밍 응답 생성
@@ -925,13 +1023,13 @@ async def generate_gemini_stream_response(
                     return
 
             # 출력 토큰 계산
-            output_token_count = await count_gemini_tokens(accumulated_content, model, client)
+            output_token_count = count_tokens_with_tiktoken(accumulated_content, model)
             output_tokens = output_token_count.get("input_tokens", 0)
             
             # 사고 토큰 계산
             thinking_tokens = 0
             if accumulated_thinking:
-                thinking_token_count = await count_gemini_tokens(accumulated_thinking, model, client)
+                thinking_token_count = count_tokens_with_tiktoken(accumulated_thinking, model)
                 thinking_tokens = thinking_token_count.get("input_tokens", 0)
 
             # 토큰 사용량 저장 (KST 시간으로 저장)
@@ -1034,7 +1132,7 @@ async def stream_project_chat(
             from app.schemas.project import ProjectChatCreate
             chat_data = ProjectChatCreate(
                 id=chat_id,
-                name="",  # 빈 이름으로 시작
+                name="새 채팅",  # 일반 채팅과 동일하게 "새 채팅"으로 시작
                 type=project.type
             )
             try:
@@ -1244,8 +1342,132 @@ def create_project_chat(
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     from app.schemas.project import ProjectChatCreate
+    
+    # 이름이 없거나 비어있으면 "새 채팅"으로 설정
+    if not chat.get("name") or chat.get("name").strip() == "":
+        chat["name"] = "새 채팅"
+    
     chat_data = ProjectChatCreate(**chat)
     return crud_project.create_chat(db=db, project_id=project_id, obj_in=chat_data, owner_id=current_user.id)
+
+async def generate_project_chat_room_name(first_message: str) -> str:
+    """프로젝트 채팅방 전용 AI 기반 제목 생성"""
+    try:
+        # 빈 메시지 처리
+        if not first_message or len(first_message.strip()) == 0:
+            return "프로젝트 채팅"
+        
+        # 간단한 fallback 먼저 생성 (AI 실패 시 사용)
+        words = first_message.strip().split()
+        fallback_title = " ".join(words[:3]) if len(words) >= 3 else " ".join(words)
+        if len(fallback_title) > 20:
+            fallback_title = fallback_title[:17] + "..."
+        
+        # Gemini 클라이언트 확인
+        from app.api.api_v1.endpoints.chat import get_gemini_client
+        from google.genai import types
+        
+        client = get_gemini_client()
+        if not client:
+            logger.info("Gemini client not available, using fallback")
+            return fallback_title
+        
+        # 채팅방 제목 생성 프롬프트
+        prompt_template = """Generate a concise and descriptive title in Korean for this chat conversation based on the AI response content.
+
+Requirements:
+- Use 2-10 Korean words only
+- No emojis or special characters
+- Capture the main topic or purpose
+- Be specific and informative
+- Return only JSON format
+
+Examples:
+{{"title": "파이썬 기초 학습"}}
+{{"title": "레시피 추천"}}
+{{"title": "프로그래밍 질문"}}
+{{"title": "일반 대화"}}
+{{"title": "인사"}}
+
+AI Response Content: {message}
+
+Generate title as JSON:"""
+
+        # 메시지 길이 제한 (토큰 절약)
+        limited_message = first_message[:300] if len(first_message) > 300 else first_message
+        
+        # 프롬프트 생성
+        prompt = prompt_template.format(message=limited_message)
+        
+        logger.info(f"Generating AI title for project chat: '{limited_message[:50]}...'")
+        
+        # Gemini API 호출
+        try:
+            logger.info(f"Calling Gemini API for project chat with model: gemini-2.0-flash-lite")
+            response = client.models.generate_content(
+                model="gemini-2.0-flash-lite",
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=50
+                )
+            )
+            
+            # 응답 텍스트 추출
+            response_text = None
+            
+            if hasattr(response, 'candidates') and response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                
+                if hasattr(candidate, 'content') and candidate.content:
+                    content = candidate.content
+                    
+                    if hasattr(content, 'parts') and content.parts and len(content.parts) > 0:
+                        for part in content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                response_text = part.text
+                                break
+            
+            elif hasattr(response, 'text') and response.text:
+                response_text = response.text
+            
+            # 응답 텍스트가 있으면 JSON 파싱 시도
+            if response_text:
+                try:
+                    import json
+                    import re
+                    
+                    # 마크다운 코드 블록 제거
+                    text = response_text.strip()
+                    if text.startswith('```'):
+                        json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+                        if json_match:
+                            text = json_match.group(1).strip()
+                    
+                    # JSON 파싱
+                    result = json.loads(text)
+                    if 'title' in result and result['title']:
+                        ai_title = result['title'].strip()
+                        if len(ai_title) <= 25:
+                            logger.info(f"Successfully generated project chat AI title: '{ai_title}'")
+                            return ai_title
+                        else:
+                            logger.info(f"Project chat AI title too long: '{ai_title}'")
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Project chat JSON decode error: {e}")
+                except Exception as e:
+                    logger.debug(f"Project chat JSON parsing error: {e}")
+            
+        except Exception as api_error:
+            logger.info(f"Project chat Gemini API error: {api_error}")
+        
+        # AI 생성 실패 시 fallback 사용
+        logger.info(f"Using fallback title for project chat: '{fallback_title}'")
+        return fallback_title
+        
+    except Exception as e:
+        logger.error(f"Project chat room name generation error: {e}", exc_info=True)
+        return "프로젝트 채팅"
 
 # 프로젝트 채팅방 이름 생성
 @router.post("/{project_id}/chats/{chat_id}/generate-name")
@@ -1266,29 +1488,61 @@ async def generate_project_chat_name(
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     try:
-        # chat.py의 함수 import 및 사용
-        from app.api.api_v1.endpoints.chat import generate_chat_room_name
+        logger.info(f"generate_project_chat_name called - project_id: {project_id}, chat_id: {chat_id}, message: {message_content[:50]}...")
         
-        # 채팅방 이름 생성
-        generated_name = await generate_chat_room_name(message_content)
+        # 프로젝트 채팅방 확인
+        project_chat = crud_project.get_chat(db=db, project_id=project_id, chat_id=chat_id)
+        if project_chat:
+            current_name = getattr(project_chat, 'name', None)
+            current_name_str = str(current_name) if current_name is not None else ""
+            logger.info(f"Found project chat: {chat_id}, current name: '{current_name_str}'")
+            
+            # "새 채팅"인 경우에만 제목 생성
+            if current_name_str and current_name_str.strip() != "" and current_name_str != "새 채팅":
+                logger.info(f"Project chat already has a name: '{current_name_str}'")
+                return {
+                    "project_id": project_id,
+                    "chat_id": chat_id,
+                    "generated_name": current_name_str,
+                    "message": "Chat already has a name"
+                }
+        else:
+            logger.info(f"Project chat not found: {chat_id} - may not be created yet")
+        
+        # 프로젝트 채팅방 이름 생성
+        generated_name = await generate_project_chat_room_name(message_content)
+        logger.info(f"AI generated name for project chat: '{generated_name}'")
         
         # 채팅방 이름 업데이트
         from app.schemas.project import ProjectChatCreate
-        chat_update = {"name": generated_name}
-        updated_chat = crud_project.update_chat(
-            db=db, 
-            project_id=project_id, 
-            chat_id=chat_id, 
-            obj_in=chat_update, 
-            owner_id=current_user.id
-        )
+        chat_update = ProjectChatCreate(name=generated_name)
         
-        return {
-            "project_id": project_id,
-            "chat_id": chat_id,
-            "generated_name": generated_name,
-            "updated_chat": updated_chat
-        }
+        try:
+            logger.info(f"Attempting to update project chat - project_id: {project_id}, chat_id: {chat_id}, update: {chat_update}")
+            updated_chat = crud_project.update_chat(
+                db=db, 
+                project_id=project_id, 
+                chat_id=chat_id, 
+                obj_in=chat_update, 
+                owner_id=current_user.id
+            )
+            logger.info(f"Project chat name updated successfully: '{generated_name}'")
+            
+            return {
+                "project_id": project_id,
+                "chat_id": chat_id,
+                "generated_name": generated_name,
+                "updated_chat": updated_chat
+            }
+        except Exception as update_error:
+            logger.info(f"Project chat update failed: {update_error} - chat_id: {chat_id}, error type: {type(update_error)}")
+            # 채팅방 업데이트에 실패해도 생성된 이름은 반환
+            return {
+                "project_id": project_id,
+                "chat_id": chat_id,
+                "generated_name": generated_name,
+                "message": "Chat name generated but room not found - may not be created yet"
+            }
         
     except Exception as e:
         logger.error(f"Project chat name generation error: {e}", exc_info=True)
@@ -2760,7 +3014,7 @@ async def generate_gemini_stream_response_with_files(
         )
 
         # 토큰 계산
-        input_token_count = await count_gemini_tokens(conversation_text, model, client)
+        input_token_count = count_tokens_with_tiktoken(conversation_text, model)
         input_tokens = input_token_count.get("input_tokens", 0)
 
         # 스트리밍 응답 생성
@@ -2820,13 +3074,13 @@ async def generate_gemini_stream_response_with_files(
                                     return
 
             # 출력 토큰 계산
-            output_token_count = await count_gemini_tokens(accumulated_content, model, client)
+            output_token_count = count_tokens_with_tiktoken(accumulated_content, model)
             output_tokens = output_token_count.get("input_tokens", 0)
             
             # 사고 토큰 계산
             thinking_tokens = 0
             if accumulated_reasoning:
-                thinking_token_count = await count_gemini_tokens(accumulated_reasoning, model, client)
+                thinking_token_count = count_tokens_with_tiktoken(accumulated_reasoning, model)
                 thinking_tokens = thinking_token_count.get("input_tokens", 0)
 
             # 토큰 사용량 저장 (KST 시간으로 저장)

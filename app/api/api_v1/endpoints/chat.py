@@ -51,6 +51,40 @@ GEMINI_MODELS = [
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 GEMINI_INLINE_DATA_LIMIT = 10 * 1024 * 1024  # 10MB (Gemini API 제한)
 
+# 최신 Gemini 모델 컨텍스트 한도 설정 (API 문서 기준)
+MODEL_CONTEXT_LIMITS = {
+    "gemini-2.5-pro": {
+        "total_tokens": 2_000_000,  # 2M 토큰
+        "output_reserve": 4096,     # 출력용 예약
+        "system_reserve": 2048,     # 시스템 프롬프트용 예약
+        "file_reserve": 10000       # 파일용 예약
+    },
+    "gemini-2.5-flash": {
+        "total_tokens": 1_000_000,  # 1M 토큰
+        "output_reserve": 2048,     # 출력용 예약
+        "system_reserve": 1024,     # 시스템 프롬프트용 예약
+        "file_reserve": 5000        # 파일용 예약
+    },
+    "gemini-2.0-flash": {
+        "total_tokens": 1_000_000,  # 1M 토큰
+        "output_reserve": 2048,
+        "system_reserve": 1024,
+        "file_reserve": 5000
+    },
+    "gemini-1.5-pro": {
+        "total_tokens": 2_000_000,  # 2M 토큰
+        "output_reserve": 4096,
+        "system_reserve": 2048,
+        "file_reserve": 10000
+    },
+    "gemini-1.5-flash": {
+        "total_tokens": 1_000_000,  # 1M 토큰
+        "output_reserve": 2048,
+        "system_reserve": 1024,
+        "file_reserve": 5000
+    }
+}
+
 # 사고 기능 최적화 설정 추가
 THINKING_OPTIMIZATION = {
     "gemini-2.5-flash": {
@@ -148,23 +182,253 @@ def get_gemini_client():
         logger.error(f"Gemini client creation error: {e}", exc_info=True)
         return None
 
-async def count_gemini_tokens(text: str, model: str, client) -> dict:
-    """정확한 Gemini 모델의 토큰 수를 계산합니다."""
+def count_tokens_with_tiktoken(text: str, model: str = "gpt-4") -> dict:
+    """tiktoken을 사용한 정확한 토큰 계산"""
+    import tiktoken
+    
     try:
-        result = client.models.count_tokens(
-            model=model,
-            contents=text
-        )
+        # Gemini 모델은 OpenAI와 다른 토크나이저를 사용하지만, 
+        # tiktoken의 cl100k_base는 비교적 정확한 추정을 제공
+        if "gemini" in model.lower():
+            # Gemini용으로 cl100k_base 사용 (GPT-4와 유사한 토큰화)
+            encoding_name = "cl100k_base"
+        else:
+            # 기타 모델용 기본값
+            encoding_name = "cl100k_base"
+            
+        encoding = tiktoken.get_encoding(encoding_name)
+        token_count = len(encoding.encode(text))
+        
         return {
-            "input_tokens": result.total_tokens,
-            "output_tokens": 0
+            "input_tokens": token_count,
+            "output_tokens": 0,
+            "method": "tiktoken",
+            "encoding": encoding_name
         }
     except Exception as e:
-        logger.error(f"Gemini token counting error: {e}", exc_info=True)
-        return {
-            "input_tokens": len(text) // 4,  # 대략적인 토큰 계산
-            "output_tokens": 0
+        logger.warning(f"tiktoken calculation failed: {e}, using fallback")
+        return fallback_token_calculation(text)
+
+def fallback_token_calculation(text: str) -> dict:
+    """tiktoken 실패 시 fallback 계산"""
+    import re
+    
+    # 한국어/영어 혼합 텍스트 정확한 추정
+    korean_chars = len(re.findall(r'[가-힣]', text))
+    english_chars = len(re.findall(r'[a-zA-Z]', text))
+    numbers_symbols = len(re.findall(r'[0-9\s\.,;:!?\-\(\)\[\]{}]', text))
+    other_chars = len(text) - korean_chars - english_chars - numbers_symbols
+    
+    # 한국어 1.3자/토큰, 영어 3.5자/토큰 (tiktoken 기준 조정)
+    estimated_tokens = (
+        korean_chars / 1.3 + 
+        english_chars / 3.5 + 
+        numbers_symbols / 2.5 + 
+        other_chars / 2
+    )
+    
+    return {
+        "input_tokens": max(1, int(estimated_tokens)),
+        "output_tokens": 0,
+        "method": "fallback",
+        "encoding": "estimated"
+    }
+
+# 컨텍스트 관리 설정
+MAX_MESSAGES_WINDOW = 15  # 최대 메시지 개수
+SUMMARY_TRIGGER_THRESHOLD = 12  # 요약 트리거 메시지 개수
+CONTEXT_SUMMARY_CACHE = {}  # 요약 캐시
+
+def get_dynamic_context_limit(model: str, system_tokens: int = 0, file_tokens: int = 0) -> int:
+    """모델별 동적 컨텍스트 한도 계산 (최신 API 기준)"""
+    # 기본값 설정 (호환성을 위해)
+    default_config = {
+        "total_tokens": 1_000_000,
+        "output_reserve": 2048,
+        "system_reserve": 1024,
+        "file_reserve": 5000
+    }
+    
+    config = MODEL_CONTEXT_LIMITS.get(model, default_config)
+    
+    # 사용 가능한 컨텍스트 계산
+    available_tokens = (
+        config["total_tokens"] 
+        - config["output_reserve"] 
+        - system_tokens 
+        - file_tokens
+    )
+    
+    # 최소 한도 보장 (너무 작으면 기본값 사용)
+    min_context = 10000
+    if available_tokens < min_context:
+        logger.warning(f"Calculated context too small ({available_tokens}), using minimum: {min_context}")
+        return min_context
+    
+    logger.info(f"Dynamic context limit for {model}: {available_tokens} tokens")
+    return available_tokens
+
+async def summarize_old_messages(client, model: str, messages: list, target_length: int = 3) -> str:
+    """오래된 메시지들을 요약하여 컨텍스트 절약"""
+    if len(messages) <= target_length:
+        return ""
+    
+    # 요약할 메시지들 (최신 3개 제외)
+    messages_to_summarize = messages[:-target_length]
+    
+    # 요약 내용 구성
+    summary_content = ""
+    for msg in messages_to_summarize:
+        role = "사용자" if msg["role"] == "user" else "AI"
+        summary_content += f"{role}: {msg['content'][:200]}{'...' if len(msg['content']) > 200 else ''}\n"
+    
+    # 요약 생성 프롬프트
+    summary_prompt = f"""다음 대화 내용을 핵심만 간단히 요약해주세요 (200자 이내):
+
+{summary_content}
+
+요약 형식: "사용자가 [주제]에 대해 질문했고, AI가 [답변 요약]을 제공했습니다."""
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",  # 요약은 빠른 모델 사용
+            contents=[summary_prompt],
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=300,
+                thinking_config=types.ThinkingConfig(thinking_budget=0)  # 요약은 사고 없이
+            )
+        )
+        
+        summary = response.text.strip()
+        logger.info(f"Generated conversation summary: {summary[:100]}...")
+        return summary
+        
+    except Exception as e:
+        logger.error(f"Failed to generate summary: {e}")
+        # Fallback: 간단한 요약
+        return f"이전 대화 ({len(messages_to_summarize)}개 메시지): 주요 질문과 답변들"
+
+def apply_sliding_window_with_summary(messages: list, room_id: str, max_messages: int = MAX_MESSAGES_WINDOW) -> list:
+    """슬라이딩 윈도우와 요약을 적용한 메시지 관리"""
+    
+    if len(messages) <= max_messages:
+        return messages
+    
+    # room_id 유효성 검사
+    if not room_id or room_id.strip() == "":
+        # room_id가 없으면 간단히 최신 메시지만 반환
+        logger.warning("No valid room_id provided, using simple sliding window")
+        return messages[-max_messages:]
+    
+    # 캐시 키 생성
+    cache_key = f"{room_id}_{len(messages)}"
+    
+    # 최신 메시지들 유지
+    recent_messages = messages[-max_messages:]
+    
+    # 요약이 필요한 경우
+    if len(messages) > SUMMARY_TRIGGER_THRESHOLD:
+        # 요약 캐시 확인
+        if cache_key not in CONTEXT_SUMMARY_CACHE:
+            # 요약 생성 (비동기 처리를 위해 일단 기본 요약 사용)
+            old_messages = messages[:-max_messages]
+            summary_text = f"[이전 대화 요약: {len(old_messages)}개 메시지]"
+            CONTEXT_SUMMARY_CACHE[cache_key] = summary_text
+        
+        # 요약을 첫 번째 메시지로 추가
+        summary_message = {
+            "role": "system",
+            "content": CONTEXT_SUMMARY_CACHE[cache_key],
+            "created_at": messages[0].get("created_at", ""),
+            "updated_at": messages[0].get("updated_at", ""),
+            "is_summary": True
         }
+        
+        return [summary_message] + recent_messages
+    
+    return recent_messages
+
+def intelligent_message_selection(messages: list, max_tokens: int, model: str) -> list:
+    """지능형 메시지 선별 (중요도 + 토큰 기반)"""
+    if not messages:
+        return []
+    
+    selected_messages = []
+    current_tokens = 0
+    
+    # 최신 3개 메시지는 무조건 포함
+    recent_count = min(3, len(messages))
+    recent_messages = messages[-recent_count:]
+    
+    for msg in recent_messages:
+        token_info = count_tokens_with_tiktoken(msg.get("content", ""), model)
+        current_tokens += token_info["input_tokens"]
+    
+    # 남은 토큰 예산으로 나머지 메시지 선별
+    remaining_messages = messages[:-recent_count] if len(messages) > recent_count else []
+    remaining_budget = max_tokens - current_tokens
+    
+    # 중요도 기반 정렬
+    scored_messages = []
+    for msg in remaining_messages:
+        content = msg.get("content", "")
+        score = calculate_message_importance(content, msg.get("role", ""))
+        token_info = count_tokens_with_tiktoken(content, model)
+        
+        scored_messages.append({
+            "message": msg,
+            "score": score,
+            "tokens": token_info["input_tokens"]
+        })
+    
+    # 중요도 순으로 정렬
+    scored_messages.sort(key=lambda x: x["score"], reverse=True)
+    
+    # 토큰 예산 내에서 선별
+    for item in scored_messages:
+        if current_tokens + item["tokens"] <= remaining_budget:
+            selected_messages.append(item["message"])
+            current_tokens += item["tokens"]
+    
+    # 시간순으로 정렬하여 반환
+    selected_messages.sort(key=lambda x: x.get("created_at", ""))
+    
+    return selected_messages + recent_messages
+
+def calculate_message_importance(content: str, role: str) -> float:
+    """메시지 중요도 계산"""
+    if not content:
+        return 0.0
+    
+    score = 0.0
+    
+    # 길이 기반 점수 (적당한 길이가 좋음)
+    length = len(content)
+    if 20 <= length <= 500:
+        score += 1.0
+    elif length > 500:
+        score += 0.7  # 너무 긴 메시지는 약간 감점
+    else:
+        score += 0.3  # 너무 짧은 메시지는 감점
+    
+    # 키워드 기반 점수
+    important_keywords = [
+        "질문", "문제", "오류", "에러", "도움", "설명", "방법", 
+        "어떻게", "왜", "무엇", "중요", "핵심", "요약", "결론"
+    ]
+    keyword_score = sum(0.2 for keyword in important_keywords if keyword in content)
+    score += min(keyword_score, 1.5)  # 최대 1.5점
+    
+    # 역할 기반 점수
+    if role == "user":
+        score *= 1.3  # 사용자 메시지가 더 중요
+    
+    # 특수 문자 점수 (질문표, 코드 블록 등)
+    if "?" in content or "```" in content:
+        score += 0.3
+    
+    return score
 
 # 함수 호출을 위한 유틸리티 함수들
 def create_weather_function():
@@ -325,51 +589,44 @@ async def generate_gemini_stream_response(
                 detail="At least one message is required"
             )
 
-        # 토큰 기반 컨텍스트 관리
-        # 모델의 최대 토큰 수 가져오기 (출력 토큰을 위한 여유 공간 확보)
-        MAX_CONTEXT_TOKENS = config.max_tokens - 2048  # 출력을 위한 2048 토큰 예약
+        # 🚀 새로운 컨텍스트 관리 시스템
+        # 1단계: 슬라이딩 윈도우 적용 (최대 15개 메시지)
+        messages = apply_sliding_window_with_summary(messages, room_id)
         
-        # 메시지를 역순으로 처리하여 최근 메시지부터 포함
-        valid_messages = []
-        total_tokens = 0
+        logger.info(f"After sliding window: {len(messages)} messages")
         
-        # 시스템 프롬프트 토큰 계산
+        # 2단계: 시스템 프롬프트 토큰 계산 (tiktoken 사용)
+        system_tokens = 0
         if config.system_prompt:
-            system_tokens = await count_gemini_tokens(config.system_prompt, model, client)
-            total_tokens += system_tokens.get("input_tokens", 0)
+            system_token_info = count_tokens_with_tiktoken(config.system_prompt, model)
+            system_tokens = system_token_info.get("input_tokens", 0)
         
-        # 파일 토큰 계산 (있는 경우)
+        # 3단계: 파일 토큰 계산
         file_tokens = 0
         if file_data_list and file_types:
-            # 이미지는 타일당 258 토큰, PDF는 페이지당 258 토큰
             for file_type in file_types:
                 if file_type.startswith("image/"):
-                    file_tokens += 258  # Gemini 2.5 기준
+                    file_tokens += 258  # Gemini 2.5 기준: 이미지당 258 토큰
                 elif file_type == "application/pdf":
-                    file_tokens += 258 * 10  # 예상 페이지 수
+                    file_tokens += 258 * 10  # 예상 페이지 수 * 258 토큰
+                elif file_type.startswith("video/"):
+                    file_tokens += 263 * 60  # 예상 1분 * 263 토큰/초
+                elif file_type.startswith("audio/"):
+                    file_tokens += 32 * 60   # 예상 1분 * 32 토큰/초
         
-        total_tokens += file_tokens
+        # 4단계: 동적 컨텍스트 한도 계산
+        MAX_CONTEXT_TOKENS = get_dynamic_context_limit(model, system_tokens, file_tokens)
         
-        # 메시지를 역순으로 검토하면서 토큰 예산 내에서 포함
-        for i in range(len(messages) - 1, -1, -1):
-            msg = messages[i]
+        # 5단계: 지능형 메시지 선별 (tiktoken 기반)
+        available_tokens = MAX_CONTEXT_TOKENS - system_tokens - file_tokens
+        valid_messages = intelligent_message_selection(messages, available_tokens, model)
+        
+        # 최종 토큰 계산
+        total_tokens = system_tokens + file_tokens
+        for msg in valid_messages:
             if msg.get("content") and msg["content"].strip():
-                # 메시지 토큰 계산
-                msg_tokens = await count_gemini_tokens(
-                    f"{msg['role']}: {msg['content']}", 
-                    model, 
-                    client
-                )
-                msg_token_count = msg_tokens.get("input_tokens", 0)
-                
-                # 토큰 예산 확인
-                if total_tokens + msg_token_count <= MAX_CONTEXT_TOKENS:
-                    valid_messages.insert(0, msg)
-                    total_tokens += msg_token_count
-                else:
-                    # 토큰 한계에 도달하면 중단
-                    logger.info(f"Context window limit reached. Including {len(valid_messages)} messages out of {len(messages)}")
-                    break
+                token_info = count_tokens_with_tiktoken(msg["content"], model)
+                total_tokens += token_info["input_tokens"]
         
         # 최소한 하나의 메시지는 포함되어야 함
         if len(valid_messages) == 0 and len(messages) > 0:
@@ -481,7 +738,7 @@ async def generate_gemini_stream_response(
                 generation_config.thinking_config = optimized_thinking_config
 
         # 입력 토큰 계산
-        input_token_count = await count_gemini_tokens(conversation_text, model, client)
+        input_token_count = count_tokens_with_tiktoken(conversation_text, model)
         input_tokens = input_token_count.get("input_tokens", 0)
 
         # 스트리밍 응답 생성 (버퍼링 최적화)
@@ -648,13 +905,13 @@ async def generate_gemini_stream_response(
             streaming_completed = True
             
             # 출력 토큰 계산
-            output_token_count = await count_gemini_tokens(accumulated_content, model, client)
+            output_token_count = count_tokens_with_tiktoken(accumulated_content, model)
             output_tokens = output_token_count.get("input_tokens", 0)
             
             # 사고 토큰 계산
             thinking_tokens = 0
             if accumulated_thinking:
-                thinking_token_count = await count_gemini_tokens(accumulated_thinking, model, client)
+                thinking_token_count = count_tokens_with_tiktoken(accumulated_thinking, model)
                 thinking_tokens = thinking_token_count.get("input_tokens", 0)
 
             # 토큰 사용량 저장 (KST 시간으로 저장)
@@ -691,24 +948,28 @@ async def generate_gemini_stream_response(
             logger.debug(f"citations count: {len(citations)}")
             logger.debug(f"citations: {citations}")
             
-            # 새로운 DB 세션으로 저장 (기존 세션과 분리)
-            from app.db.session import SessionLocal
-            new_db = SessionLocal()
-            try:
-                message_create = ChatMessageCreate(
-                    content=accumulated_content,
-                    role="assistant",
-                    room_id=room_id,
-                    reasoning_content=accumulated_thinking if accumulated_thinking else None,
-                    thought_time=thought_time if thought_time > 0 else None,
-                    citations=citations if citations else None
-                )
-                saved_message = crud_chat.create_message(new_db, room_id, message_create)
-                logger.info(f"Message saved with ID: {saved_message.id}")
-                logger.debug(f"Saved message citations: {saved_message.citations}")
-                logger.debug("=== END SAVING DEBUG ===")
-            finally:
-                new_db.close()
+            # room_id 유효성 검사 (메시지 저장 전)
+            if not room_id or room_id.strip() == "" or room_id == "unknown":
+                logger.warning(f"Invalid room_id for message saving: {room_id}, skipping save")
+            else:
+                # 새로운 DB 세션으로 저장 (기존 세션과 분리)
+                from app.db.session import SessionLocal
+                new_db = SessionLocal()
+                try:
+                    message_create = ChatMessageCreate(
+                        content=accumulated_content,
+                        role="assistant",
+                        room_id=room_id,
+                        reasoning_content=accumulated_thinking if accumulated_thinking else None,
+                        thought_time=thought_time if thought_time > 0 else None,
+                        citations=citations if citations else None
+                    )
+                    saved_message = crud_chat.create_message(new_db, room_id, message_create)
+                    logger.info(f"Message saved with ID: {saved_message.id}")
+                    logger.debug(f"Saved message citations: {saved_message.citations}")
+                    logger.debug("=== END SAVING DEBUG ===")
+                finally:
+                    new_db.close()
         else:
             logger.info("=== MESSAGE NOT SAVED ===")
             logger.info(f"streaming_completed: {streaming_completed}")
@@ -847,107 +1108,142 @@ async def generate_chat_room_name(first_message: str) -> str:
         # Gemini 클라이언트 확인
         client = get_gemini_client()
         if not client:
-            logger.warning("Gemini client not available, using fallback")
+            logger.info("Gemini client not available, using fallback")
             return fallback_title
         
-        # 개선된 프롬프트 템플릿
-        prompt_template = """사용자 메시지를 분석해서 대화 주제를 나타내는 간결한 한국어 제목을 만드세요.
+        # Open-WebUI 스타일의 채팅방 제목 생성 프롬프트
+        prompt_template = """Generate a concise and descriptive title in Korean for this chat conversation based on the AI response content.
 
-규칙:
-- 3-5단어 + 이모지 1개
-- 대화 주제나 질문 내용을 요약
-- 단순한 인사말("안녕", "하이", "헬로", "hi" 등)은 반드시 "💬 일반 대화"로 처리
-- 의미있는 내용이 있을 때만 구체적인 제목 생성
-- JSON 형식으로만 응답
+Requirements:
+- Use 2-10 Korean words only
+- No emojis or special characters
+- Capture the main topic or purpose
+- Be specific and informative
+- Return only JSON format
 
-예시:
-{{"title": "📚 파이썬 학습 질문"}}
-{{"title": "🍕 요리 레시피 문의"}}
-{{"title": "💻 프로그래밍 도움"}}
-{{"title": "💬 일반 대화"}}
+Examples:
+{{"title": "파이썬 기초 학습"}}
+{{"title": "레시피 추천"}}
+{{"title": "프로그래밍 질문"}}
+{{"title": "일반 대화"}}
+{{"title": "인사"}}
 
-특별 처리:
-- "안녕", "하이", "헬로", "hi", "hello" 등 → {{"title": "💬 일반 대화"}}
-- 단순 인사 이외의 의미있는 내용 → 구체적인 제목 생성
+AI Response Content: {message}
 
-사용자 메시지: {message}
-
-JSON 응답:"""
+Generate title as JSON:"""
 
         # 메시지 길이 제한 (토큰 절약)
-        limited_message = first_message[:200] if len(first_message) > 200 else first_message
+        limited_message = first_message[:300] if len(first_message) > 300 else first_message
         
         # 프롬프트 생성
         prompt = prompt_template.format(message=limited_message)
         
-        logger.info(f"Generating AI title for message: '{limited_message[:50]}...'")
+        logger.info(f"Generating AI title for response: '{limited_message[:50]}...'")
         
         # Gemini API 호출
-        logger.info(f"Final prompt being sent to Gemini: {repr(prompt)}")
+        logger.debug(f"Final prompt being sent to Gemini: {repr(prompt)}")
         try:
+            logger.info(f"Calling Gemini API with model: gemini-2.0-flash-lite")
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash-lite",
                 contents=[prompt],
                 config=types.GenerateContentConfig(
-                    temperature=0.1,  # 일관된 결과를 위해 낮은 온도
-                    max_output_tokens=100  # JSON 응답용
+                    temperature=0.3,  # 창의적인 제목 생성을 위해 적당한 온도
+                    max_output_tokens=50  # 간단한 JSON 응답용
                 )
             )
-            logger.info(f"Gemini raw response: {repr(response.text)}")
+            logger.info(f"API call completed successfully")
+            logger.debug(f"Response object: {type(response)}")
             
-            # JSON 응답 파싱 (마크다운 코드 블록 제거)
-            if hasattr(response, 'text') and response.text:
-                import json
-                import re
+            # text 속성 확인
+            if hasattr(response, 'text'):
+                logger.debug(f"Gemini raw response text: {repr(response.text)}")
+            
+            # candidates 확인
+            if hasattr(response, 'candidates'):
+                logger.debug(f"Response has {len(response.candidates) if response.candidates else 0} candidates")
+            
+            # 응답 텍스트 추출 및 JSON 파싱
+            response_text = None
+            
+            # Gemini API 문서에 따른 표준 응답 구조로 텍스트 추출
+            # 1. candidates[0].content.parts에서 텍스트 추출 (표준 방법)
+            if hasattr(response, 'candidates') and response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]  # 첫 번째 후보 사용
+                logger.debug(f"Working with candidate: {type(candidate)}")
+                
+                if hasattr(candidate, 'content') and candidate.content:
+                    content = candidate.content
+                    logger.debug(f"Content type: {type(content)}")
+                    
+                    # content.parts 확인
+                    if hasattr(content, 'parts'):
+                        if content.parts and len(content.parts) > 0:
+                            logger.debug(f"Found {len(content.parts)} parts")
+                            for i, part in enumerate(content.parts):
+                                if hasattr(part, 'text') and part.text:
+                                    response_text = part.text
+                                    logger.info(f"Got text from part {i}: '{response_text[:100]}...'")
+                                    break
+                        else:
+                            logger.debug("Parts list is empty")
+                            # content를 dict로 변환해서 확인
+                            try:
+                                content_dict = content.model_dump() if hasattr(content, 'model_dump') else content.dict()
+                                if 'parts' in content_dict and content_dict['parts']:
+                                    for i, part_dict in enumerate(content_dict['parts']):
+                                        if 'text' in part_dict and part_dict['text']:
+                                            response_text = part_dict['text']
+                                            logger.info(f"Got text from dict part {i}: '{response_text[:100]}...'")
+                                            break
+                            except Exception as e:
+                                logger.debug(f"Error converting content to dict: {e}")
+                            
+                            # content에서 직접 텍스트 찾기
+                            if not response_text and hasattr(content, 'text') and content.text:
+                                response_text = content.text
+                                logger.info(f"Got text from content.text: '{response_text[:100]}...'")
+                    else:
+                        logger.debug("No parts attribute in content")
+                else:
+                    logger.debug("No content found in candidate")
+            
+            # 2. response.text fallback 시도
+            elif hasattr(response, 'text') and response.text:
+                response_text = response.text
+                logger.info(f"Got text from response.text (fallback): '{response_text[:100]}...'")
+            
+            # 응답 텍스트가 있으면 JSON 파싱 시도
+            if response_text:
                 try:
-                    # 마크다운 코드 블록 제거 (```json ... ``` 형태)
-                    text = response.text.strip()
+                    import json
+                    import re
+                    
+                    # 마크다운 코드 블록 제거
+                    text = response_text.strip()
                     if text.startswith('```'):
-                        # 코드 블록에서 JSON 부분만 추출
                         json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
                         if json_match:
                             text = json_match.group(1).strip()
                     
+                    # JSON 파싱
                     result = json.loads(text)
                     if 'title' in result and result['title']:
                         ai_title = result['title'].strip()
-                        # 길이 제한 확인
                         if len(ai_title) <= 25:
-                            logger.info(f"✓ AI generated title: '{ai_title}'")
+                            logger.info(f"Successfully generated AI title: '{ai_title}'")
                             return ai_title
                         else:
-                            logger.warning(f"AI title too long: '{ai_title}', using fallback")
+                            logger.info(f"AI title too long: '{ai_title}'")
                 except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse JSON response: {e}, response: '{response.text}'")
-            
-            # candidates 구조 시도 (마크다운 코드 블록 제거)
-            if hasattr(response, 'candidates') and response.candidates:
-                for candidate in response.candidates:
-                    if hasattr(candidate, 'content') and candidate.content:
-                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                            for part in candidate.content.parts:
-                                if hasattr(part, 'text') and part.text:
-                                    try:
-                                        import json
-                                        import re
-                                        # 마크다운 코드 블록 제거
-                                        text = part.text.strip()
-                                        if text.startswith('```'):
-                                            json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-                                            if json_match:
-                                                text = json_match.group(1).strip()
-                                        
-                                        result = json.loads(text)
-                                        if 'title' in result and result['title']:
-                                            ai_title = result['title'].strip()
-                                            if len(ai_title) <= 25:
-                                                logger.info(f"✓ AI generated title from candidates: '{ai_title}'")
-                                                return ai_title
-                                    except json.JSONDecodeError:
-                                        continue
+                    logger.debug(f"JSON decode error: {e}, text: '{text[:100]}...'")
+                except Exception as e:
+                    logger.debug(f"Error parsing response: {e}")
+            else:
+                logger.debug("Could not extract text from response")
             
         except Exception as api_error:
-            logger.warning(f"Gemini API call failed: {api_error}")
+            logger.info(f"Gemini API call failed: {api_error}")
         
         # AI 생성 실패 시 fallback 사용
         logger.info(f"Using fallback title: '{fallback_title}'")
@@ -1036,21 +1332,66 @@ async def generate_room_name(
 ):
     """첫 번째 메시지를 기반으로 채팅방 이름을 생성하고 업데이트합니다."""
     try:
+        logger.info(f"🔍 generate_room_name called - room_id: {room_id}, message: {message_content[:50]}...")
+        
         # 채팅방 소유권 확인
         chat_room = crud_chat.get_chat_room(db, room_id, current_user.id)
         if not chat_room:
-            raise HTTPException(status_code=404, detail="Chat room not found")
+            logger.info(f"❌ Chat room not found: {room_id} - room may not be created yet")
+            return {
+                "room_id": room_id,
+                "generated_name": "새 채팅",
+                "message": "Chat room not found - may not be created yet"
+            }
         
-        # 채팅방 이름 생성
-        generated_name = await generate_chat_room_name(message_content)
+        logger.info(f"🔍 Found chat room: {chat_room.id}, current name: '{chat_room.name}'")
+        
+        # 채팅방 이름이 이미 설정되어 있는지 확인
+        try:
+            current_name = getattr(chat_room, 'name', None)
+            current_name_str = str(current_name) if current_name is not None else ""
+        except:
+            current_name_str = ""
+            
+        logger.info(f"🔍 Current name check: '{current_name_str}'")
+        
+        # "새 채팅"인 경우에만 제목 생성
+        if current_name_str and current_name_str.strip() != "" and current_name_str != "새 채팅":
+            logger.info(f"⏭️ Room already has a name: '{current_name_str}'")
+            return {
+                "room_id": room_id,
+                "generated_name": current_name_str,
+                "message": "Room already has a name"
+            }
+        
+        # 전달받은 메시지 내용으로 제목 생성
+        if not message_content or message_content.strip() == "":
+            logger.info("❌ Message content is required")
+            raise HTTPException(status_code=400, detail="Message content is required")
+        
+        logger.info(f"🔄 Generating room name for message: '{message_content[:50]}...'")
+        
+        # AI 기반 제목 생성
+        generated_name = await generate_chat_room_name(message_content.strip())
+        logger.info(f"🎯 AI generated name: '{generated_name}'")
+        
+        if not generated_name or generated_name == "새 채팅":
+            # AI 생성 실패 시 fallback
+            words = message_content.strip().split()
+            fallback_title = " ".join(words[:3]) if len(words) >= 3 else message_content.strip()
+            if len(fallback_title) > 20:
+                fallback_title = fallback_title[:17] + "..."
+            generated_name = fallback_title
+            logger.info(f"🔄 Using fallback title: '{generated_name}'")
         
         # 채팅방 이름 업데이트
         from app.schemas.chat import ChatRoomCreate
-        room_update = ChatRoomCreate(
-            name=generated_name
-        )
+        room_update = ChatRoomCreate(name=generated_name)
         
+        logger.info(f"💾 Updating room name to: '{generated_name}'")
         updated_room = crud_chat.update_chat_room(db, room_id, room_update, current_user.id)
+        
+        logger.info(f"✅ Room name updated: '{generated_name}'")
         
         return {
             "room_id": room_id,
@@ -1061,7 +1402,7 @@ async def generate_room_name(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Room name generation error: {e}", exc_info=True)
+        logger.error(f"❌ Room name generation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to generate room name")
 
 @router.get("/rooms", response_model=ChatRoomList)
@@ -1182,7 +1523,11 @@ async def create_chat_message(
                     "data": file_data
                 } for file_data, file_type, file_name in zip(file_data_list, file_types, file_names)] if file_data_list else None
             )
-            crud_chat.create_message(db, room_id, user_message)
+            # room_id 검증 후 저장
+            if room_id and room_id.strip() != "" and room_id != "unknown":
+                crud_chat.create_message(db, room_id, user_message)
+            else:
+                logger.warning(f"Invalid room_id for user message saving: {room_id}, skipping save")
 
         # 구독 사용량 업데이트 (crud_subscription 사용)
         updated_subscription = crud_subscription.update_model_usage(
@@ -1682,7 +2027,7 @@ async def search_web(
                     return
             
             # 검색이 정상적으로 완료된 경우에만 DB에 저장
-            if search_completed and accumulated_content:
+            if search_completed and accumulated_content and room_id and room_id.strip() != "" and room_id != "unknown":
                 logger.debug("=== SEARCH SAVING DEBUG ===")
                 logger.debug(f"search_completed: {search_completed}")
                 logger.debug(f"Saving search response with {len(citations)} citations: {citations}")
@@ -1785,7 +2130,7 @@ async def compress_context_if_needed(
     # 토큰 수 계산
     total_tokens = 0
     for msg in messages:
-        token_count = await count_gemini_tokens(msg["content"], model, client)
+        token_count = count_tokens_with_tiktoken(msg["content"], model)
         total_tokens += token_count.get("input_tokens", 0)
     
     # 압축이 필요한지 확인

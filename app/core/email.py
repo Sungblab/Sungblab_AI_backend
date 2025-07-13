@@ -97,7 +97,7 @@ def send_reset_password_email(email_to: str, token: str) -> None:
             <div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
                 <p style="color: #6b7280; font-size: 13px;">
                     본 메일은 발신 전용으로 회신이 불가합니다.<br>
-                    © 2024 Sungblab AI. All rights reserved.
+                    © 2025 Sungblab AI. All rights reserved.
                 </p>
             </div>
         </div>
@@ -182,7 +182,7 @@ def send_verification_email(email_to: str, verification_code: str) -> None:
             <div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
                 <p style="color: #6b7280; font-size: 13px;">
                     본 메일은 발신 전용으로 회신이 불가합니다.<br>
-                    © 2024 Sungblab AI. All rights reserved.
+                    © 2025 Sungblab AI. All rights reserved.
                 </p>
             </div>
         </div>
@@ -203,7 +203,7 @@ Sungblab AI 회원가입을 위한 인증 코드를 안내해 드립니다.
 감사합니다.
 Sungblab AI 팀
 
-© 2024 Sungblab AI. All rights reserved.
+© 2025 Sungblab AI. All rights reserved.
     """
     
     # 커스텀 헤더 추가

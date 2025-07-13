@@ -38,6 +38,31 @@ def init_db() -> None:
                         logger.info("Added similarity_threshold column to project_embeddings table")
                 except Exception as e:
                     logger.warning(f"Could not check/add similarity_threshold column: {e}")
+                
+                # email_verifications 테이블에 id 컬럼이 없으면 추가
+                try:
+                    result = conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'email_verifications' AND column_name = 'id'"
+                    ))
+                    if not result.fetchone():
+                        # id 컬럼 추가
+                        conn.execute(text(
+                            "ALTER TABLE email_verifications ADD COLUMN id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()"
+                        ))
+                        conn.commit()
+                        logger.info("Added id column to email_verifications table")
+                        
+                        # 기존 데이터에 UUID 할당
+                        conn.execute(text(
+                            "UPDATE email_verifications SET id = gen_random_uuid() WHERE id IS NULL"
+                        ))
+                        conn.commit()
+                        logger.info("Updated existing records with UUID values")
+                    else:
+                        logger.info("id column already exists in email_verifications table")
+                except Exception as e:
+                    logger.warning(f"Could not check/add id column to email_verifications: {e}")
             
             break
         except OperationalError as e:

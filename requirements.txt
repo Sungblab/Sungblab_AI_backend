@@ -31,4 +31,3 @@ sentry-sdk[fastapi]
 psutil
 schedule
 bleach
-alembic
