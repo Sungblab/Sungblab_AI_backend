@@ -139,4 +139,26 @@ def update_user(db: Session, *, user: User, obj_in: UserUpdate) -> User:
     db.add(user)
     db.commit()
     db.refresh(user)
+    return user
+
+def update_refresh_token(db: Session, *, user: User, refresh_token: str, expires_delta: timedelta) -> User:
+    """
+    사용자의 refresh token을 업데이트합니다.
+    """
+    user.refresh_token = refresh_token
+    user.refresh_token_expires = datetime.now(timezone.utc) + expires_delta
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+def clear_refresh_token(db: Session, *, user: User) -> User:
+    """
+    사용자의 refresh token을 삭제합니다.
+    """
+    user.refresh_token = None
+    user.refresh_token_expires = None
+    db.add(user)
+    db.commit()
+    db.refresh(user)
     return user 

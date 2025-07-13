@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     
     # Gemini API 설정 (유일한 AI API)
     GEMINI_API_KEY: str

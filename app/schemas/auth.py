@@ -24,8 +24,12 @@ class User(UserBase):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
     expires_in: int  # 토큰 만료 시간 (초 단위)
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 class SocialLogin(BaseModel):
     provider: AuthProvider

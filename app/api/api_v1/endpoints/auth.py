@@ -9,7 +9,7 @@ from app.core import security
 from app.core.security import get_current_user
 from app.core.oauth2 import verify_google_token
 from app.db.session import get_db
-from app.schemas.auth import Token, UserCreate, User, SocialLogin, GoogleUser
+from app.schemas.auth import Token, UserCreate, User, SocialLogin, GoogleUser, RefreshTokenRequest
 from app.crud import crud_user, crud_email_verification
 from app.api import deps
 from app.core.email import send_reset_password_email, send_verification_email
@@ -112,13 +112,22 @@ def login(
         # 기본 토큰 (1일)
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
+    # Access token과 refresh token 생성
     access_token = security.create_access_token(
         user.id, expires_delta=access_token_expires
     )
+    refresh_token = security.create_refresh_token(user.id)
+    
+    # 사용자에게 refresh token 저장
+    from datetime import timedelta
+    refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
+    
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
+        "expires_in": int(access_token_expires.total_seconds())
     }
 
 @router.post("/login-json", response_model=Token, summary="사용자 로그인 (JSON 방식)")
@@ -169,13 +178,22 @@ def login_json(
         # 기본 토큰 (1일)
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
+    # Access token과 refresh token 생성
     access_token = security.create_access_token(
         user.id, expires_delta=access_token_expires
     )
+    refresh_token = security.create_refresh_token(user.id)
+    
+    # 사용자에게 refresh token 저장
+    from datetime import timedelta
+    refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
+    
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
+        "expires_in": int(access_token_expires.total_seconds())
     }
 
 @router.get("/me", response_model=User)
@@ -296,15 +314,22 @@ async def google_auth(
         # 소셜 로그인은 항상 30일 토큰 발급
         access_token_expires = timedelta(days=30)
 
-        # 액세스 토큰 생성
+        # Access token과 refresh token 생성
         access_token = security.create_access_token(
             user.id, expires_delta=access_token_expires
         )
+        refresh_token = security.create_refresh_token(user.id)
+        
+        # 사용자에게 refresh token 저장
+        from datetime import timedelta
+        refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
 
         return {
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
-            "expires_in": int(access_token_expires.total_seconds())  # 만료 시간을 초 단위로 반환
+            "expires_in": int(access_token_expires.total_seconds())
         }
     except Exception as e:
         raise HTTPException(
@@ -350,4 +375,73 @@ def verify_email(
             detail="잘못된 인증 코드이거나 만료되었습니다.",
         )
     
-    return {"message": "이메일 인증이 완료되었습니다."} 
+    return {"message": "이메일 인증이 완료되었습니다."}
+
+@router.post("/refresh", response_model=Token, summary="토큰 갱신")
+def refresh_token(
+    refresh_request: RefreshTokenRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    refresh token을 사용하여 새로운 access token 발급
+    
+    - **refresh_token**: 유효한 refresh token
+    
+    **응답:**
+    - access_token: 새로운 JWT 토큰
+    - refresh_token: 새로운 refresh token  
+    - token_type: "bearer"
+    - expires_in: 토큰 만료 시간 (초 단위)
+    """
+    # Refresh token 검증
+    user_id = security.verify_refresh_token(refresh_request.refresh_token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="유효하지 않은 refresh token입니다.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 사용자 조회
+    user = crud_user.get_user(db, id=user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="사용자를 찾을 수 없습니다.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 저장된 refresh token과 비교
+    if user.refresh_token != refresh_request.refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="유효하지 않은 refresh token입니다.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Refresh token 만료 확인
+    from datetime import datetime, timezone
+    if user.refresh_token_expires and datetime.now(timezone.utc) > user.refresh_token_expires:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="만료된 refresh token입니다.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 새로운 토큰들 생성
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = security.create_access_token(
+        user.id, expires_delta=access_token_expires
+    )
+    new_refresh_token = security.create_refresh_token(user.id)
+    
+    # 새로운 refresh token 저장
+    refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    crud_user.update_refresh_token(db, user, new_refresh_token, refresh_expires)
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+        "expires_in": int(access_token_expires.total_seconds())
+    } 

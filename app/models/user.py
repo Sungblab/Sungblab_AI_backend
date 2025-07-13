@@ -25,6 +25,10 @@ class User(Base):
     reset_password_token = Column(String, nullable=True)
     reset_password_token_expires = Column(DateTime(timezone=True), nullable=True)
     
+    # 리프레시 토큰 관련 필드
+    refresh_token = Column(String, nullable=True)
+    refresh_token_expires = Column(DateTime(timezone=True), nullable=True)
+    
     # 소셜 로그인 관련 필드
     auth_provider = Column(SQLEnum(AuthProvider), default=AuthProvider.LOCAL)
     social_id = Column(String, nullable=True)  # 소셜 서비스에서의 고유 ID
