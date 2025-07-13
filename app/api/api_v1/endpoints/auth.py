@@ -120,7 +120,7 @@ def login(
     
     # 사용자에게 refresh token 저장
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
+    crud_user.update_refresh_token(db, user=user, refresh_token=refresh_token, expires_delta=refresh_expires)
     
     return {
         "access_token": access_token,
@@ -185,7 +185,7 @@ def login_json(
     
     # 사용자에게 refresh token 저장
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
+    crud_user.update_refresh_token(db, user=user, refresh_token=refresh_token, expires_delta=refresh_expires)
     
     return {
         "access_token": access_token,
@@ -320,7 +320,7 @@ async def google_auth(
         
         # 사용자에게 refresh token 저장
         refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        crud_user.update_refresh_token(db, user, refresh_token, refresh_expires)
+        crud_user.update_refresh_token(db, user=user, refresh_token=refresh_token, expires_delta=refresh_expires)
 
         return {
             "access_token": access_token,
@@ -433,7 +433,7 @@ def refresh_token(
     
     # 새로운 refresh token 저장
     refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    crud_user.update_refresh_token(db, user, new_refresh_token, refresh_expires)
+    crud_user.update_refresh_token(db, user=user, refresh_token=new_refresh_token, expires_delta=refresh_expires)
     
     return {
         "access_token": access_token,
