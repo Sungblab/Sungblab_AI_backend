@@ -1,41 +1,98 @@
-# Sungblab AI Backend
+# SungbLab AI Backend
 
-Sungblab AI Backend는 강력하고 확장 가능한 AI 기반 애플리케이션을 신속하게 구축할 수 있도록 설계된 고성능 백엔드 프레임워크입니다. 최신 기술 스택을 활용하여 보안, 속도, 안정성에 중점을 두었으며, 모듈화된 아키텍처를 통해 유지보수와 기능 확장이 용이합니다.
+SungbLab AI Backend는 교육용 AI 플랫폼을 위한 고성능 백엔드 시스템으로, 다양한 AI 모델과의 대화, 프로젝트 기반 학습, 파일 분석 등을 지원합니다. Google Gemini AI를 중심으로 한 멀티모달 AI 서비스를 제공하며, 확장 가능한 아키텍처로 설계되었습니다.
 
 ## ✨ 주요 기능
 
-- **🚀 고성능 비동기 처리**: FastAPI를 기반으로 비동기 처리를 완벽하게 지원하여 높은 동시성과 빠른 응답 속도를 보장합니다.
-- **🛡️ 강화된 보안 시스템**: OAuth2, JWT 토큰 기반의 안전한 인증 시스템과 함께, 접근 제어, 데이터 검증, 보안 헤더 설정을 포함한 다층적 보안 아키텍처를 갖추고 있습니다.
-- **✍️ 구조화된 로깅**: 프로젝트 전반에 걸쳐 일관된 형식의 구조화된 로그(JSON)를 기록합니다. 이를 통해 로그 검색, 분석, 모니터링이 용이하며, 에러 추적 및 디버깅 효율을 극대화합니다.
-- **⚡ 지능형 캐싱 전략**: Redis를 활용한 중앙 집중식 캐시 시스템을 통해 반복적인 AI 연산(토큰 계산, 임베딩 생성) 및 데이터베이스 쿼리 비용을 최소화합니다. 인증, API 응답 등 다양한 영역에 특화된 캐시를 적용하여 시스템 전반의 성능을 향상시킵니다.
-- **📊 선택적 성능 모니터링**: 필요에 따라 요청 처리 시간, 메모리 사용량, 데이터베이스 쿼리 성능 등을 모니터링하여 시스템 병목 현상을 식별하고 최적화할 수 있습니다.
-- **🔄 최적화된 배치 처리**: 대용량 데이터(텍스트, 파일)의 임베딩 생성 및 처리를 위한 비동기 배치 처리 시스템을 구현했습니다. 우선순위 큐를 통해 중요한 작업을 먼저 처리하고, 시스템 부하를 효율적으로 관리합니다.
-- **⏰ 스케줄링 태스크**: 로그 정리 및 주간 유지보수와 같은 백그라운드 작업을 자동화하여 시스템의 안정적인 운영을 지원합니다.
-- **⚙️ 체계적인 설정 관리**: Pydantic을 사용하여 환경 변수 기반의 설정을 관리하며, 개발, 테스트, 프로덕션 환경에 맞는 설정을 손쉽게 적용할 수 있습니다.
-- **📦 모듈화된 아키텍처**: 기능별(사용자, 채팅, 프로젝트 등)로 코드를 명확하게 분리하여 응집도를 높이고 결합도를 낮췄습니다. 이는 코드의 재사용성을 높이고, 새로운 기능을 추가하거나 기존 기능을 수정하기 쉽게 만듭니다.
+### 🧠 AI 채팅 시스템
+- **일반 채팅**: Google Gemini AI를 활용한 실시간 대화
+- **프로젝트 채팅**: 파일 업로드 및 컨텍스트 기반 전문 상담
+- **스트리밍 응답**: Server-Sent Events를 통한 실시간 응답
+- **토큰 사용량 추적**: 정확한 비용 계산 및 사용량 모니터링
+
+### 📁 프로젝트 관리 시스템
+- **파일 업로드**: 다양한 형식 지원 (PDF, DOCX, TXT, 이미지 등)
+- **벡터 검색**: pgvector를 활용한 임베딩 기반 유사도 검색
+- **지식 베이스**: 업로드된 파일들을 기반으로 한 컨텍스트 제공
+- **프롬프트 개선**: AI 기반 프롬프트 최적화
+
+### 👥 사용자 및 인증 시스템
+- **회원가입/로그인**: 이메일 기반 계정 관리
+- **소셜 로그인**: Google OAuth2 연동
+- **이메일 인증**: 안전한 계정 활성화
+- **구독 관리**: 토큰 기반 사용량 제한 시스템
+
+### 🔧 관리자 기능
+- **사용자 관리**: 계정 활성화, 권한 부여, 사용량 초기화
+- **구독 관리**: 플랜 변경, 만료 관리, 갱신 처리
+- **시스템 모니터링**: 채팅 통계, 사용량 분석, 오버뷰 대시보드
+
+### 🛡️ 고급 보안 및 성능 기능
+- **JWT 토큰 인증**: 안전한 API 접근 제어
+- **Redis 캐싱**: 반복 연산 최적화 및 응답 속도 향상
+- **구조화된 로깅**: JSON 기반 로그 시스템으로 추적 및 디버깅 지원
+- **에러 추적**: Sentry 연동으로 실시간 오류 모니터링
+- **성능 모니터링**: 요청 처리 시간 및 시스템 리소스 추적
 
 ## 🛠️ 기술 스택
 
-- **Backend**: Python, FastAPI, Uvicorn
-- **Database**: PostgreSQL (with pgvector for vector similarity search)
-- **Cache**: Redis
-- **Async**: asyncio
-- **Data Validation**: Pydantic
-- **Authentication**: python-jose, passlib
-- **Dependency Management**: pip
+### 핵심 프레임워크
+- **Backend**: Python 3.9+, FastAPI, Uvicorn
+- **Database**: PostgreSQL + pgvector (벡터 검색)
+- **Cache**: Redis (세션 및 응답 캐싱)
+- **AI Integration**: Google Gemini API
+
+### 주요 라이브러리
+- **비동기 처리**: asyncio, aiofiles
+- **데이터 검증**: Pydantic, pydantic-settings
+- **인증 보안**: python-jose, passlib, OAuth2
+- **데이터베이스**: SQLAlchemy, psycopg2-binary
+- **모니터링**: Sentry, Prometheus, psutil
+- **파일 처리**: Pillow, bleach
+- **이메일**: emails, jinja2
+- **배경 작업**: Celery, schedule
+- **기타**: httpx, python-multipart, tiktoken
 
 ## 📂 프로젝트 구조
 
 ```
-app/
-├── api/            # API 엔드포인트 및 라우터
-├── core/           # 핵심 로직 (보안, 캐시, 로깅, 설정 등)
-├── crud/           # 데이터베이스 CRUD (Create, Read, Update, Delete) 연산
-├── db/             # 데이터베이스 세션 및 초기화
-├── models/         # SQLAlchemy 데이터베이스 모델
-├── schemas/        # Pydantic 데이터 스키마 (요청/응답 모델)
-├── utils/          # 보조 유틸리티 함수
-└── main.py         # FastAPI 애플리케이션 진입점
+Sungblab_AI_backend/
+├── app/
+│   ├── api/                    # API 라우터 및 엔드포인트
+│   │   ├── api_v1/
+│   │   │   ├── api.py         # 메인 API 라우터
+│   │   │   └── endpoints/     # 기능별 엔드포인트
+│   │   │       ├── admin.py   # 관리자 기능 (사용자/구독 관리)
+│   │   │       ├── auth.py    # 인증 (로그인/회원가입/소셜로그인)
+│   │   │       ├── chat.py    # 일반 AI 채팅
+│   │   │       ├── projects.py # 프로젝트 관리 및 전문 채팅
+│   │   │       └── users.py   # 사용자 프로필 관리
+│   │   └── deps.py            # 의존성 주입
+│   ├── core/                   # 핵심 시스템 로직
+│   │   ├── config.py          # 환경 설정 관리
+│   │   ├── security.py        # 보안 및 인증
+│   │   ├── cache.py           # Redis 캐싱 시스템
+│   │   ├── chat.py            # AI 채팅 코어 로직
+│   │   ├── logging_config.py  # 구조화된 로깅
+│   │   ├── error_tracking.py  # Sentry 에러 추적
+│   │   └── health_monitor.py  # 시스템 모니터링
+│   ├── crud/                   # 데이터베이스 CRUD 연산
+│   │   ├── crud_user.py       # 사용자 데이터 관리
+│   │   ├── crud_chat.py       # 채팅 데이터 관리
+│   │   ├── crud_project.py    # 프로젝트 데이터 관리
+│   │   └── crud_subscription.py # 구독 관리
+│   ├── models/                 # SQLAlchemy 데이터베이스 모델
+│   │   ├── user.py            # 사용자 모델
+│   │   ├── chat.py            # 채팅 관련 모델
+│   │   ├── project.py         # 프로젝트 모델
+│   │   └── subscription.py    # 구독 모델
+│   ├── schemas/                # Pydantic 스키마 (요청/응답)
+│   ├── utils/                  # 유틸리티 함수
+│   └── main.py                # FastAPI 애플리케이션 진입점
+├── docker-compose.yml          # Docker 컨테이너 설정
+├── Dockerfile                 # 애플리케이션 Docker 이미지
+├── requirements.txt           # Python 의존성
+└── start.sh                  # 서버 시작 스크립트
 ```
 
 ## 🚀 시작하기
@@ -59,37 +116,161 @@ app/
    ```bash
    cp .env.example .env
    ```
-   **주요 환경 변수:**
-   - `DATABASE_URL`: PostgreSQL 데이터베이스 연결 정보
-   - `REDIS_URL`: Redis 연결 정보
-   - `SECRET_KEY`: JWT 토큰 생성을 위한 비밀 키
-   - `ALGORITHM`: JWT 토큰 암호화 알고리즘
+
+   **필수 환경 변수:**
+   ```env
+   # 데이터베이스 및 캐시
+   DATABASE_URL=postgresql://user:password@localhost:5432/sungblab_db
+   REDIS_URL=redis://localhost:6379
+   
+   # JWT 인증
+   SECRET_KEY=your-secret-key-here
+   ALGORITHM=HS256
+   ACCESS_TOKEN_EXPIRE_MINUTES=1440
+   
+   # AI API
+   GEMINI_API_KEY=your-gemini-api-key
+   
+   # 이메일 설정
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=your-email@gmail.com
+   SMTP_PASSWORD=your-app-password
+   EMAILS_FROM_EMAIL=your-email@gmail.com
+   EMAILS_FROM_NAME=SungbLab
+   
+   # Google OAuth
+   GOOGLE_CLIENT_ID=your-google-client-id
+   GOOGLE_CLIENT_SECRET=your-google-client-secret
+   GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/social/google
+   
+   # 관리자 계정
+   ADMIN_EMAIL=admin@sungblab.com
+   ADMIN_NAME=Administrator
+   ADMIN_INITIAL_PASSWORD=admin123
+   CREATE_INITIAL_ADMIN=true
+   
+   # 기타
+   FRONTEND_URL=http://localhost:3000
+   ENVIRONMENT=development
+   DEBUG=true
+   ```
 
 3. **Docker를 이용한 실행:**
-   프로젝트 루트 디렉토리에서 다음 명령어를 실행하여 Docker 컨테이너를 빌드하고 실행합니다.
    ```bash
+   # 개발 환경 실행 (Redis만 포함)
    docker-compose up --build
+   
+   # 또는 백그라운드 실행
+   docker-compose up -d --build
    ```
-   이 명령어는 FastAPI 애플리케이션, PostgreSQL 데이터베이스, Redis를 함께 실행합니다.
+   
+   **로컬 개발 환경:**
+   ```bash
+   # 의존성 설치
+   pip install -r requirements.txt
+   
+   # Redis 시작 (별도 터미널)
+   docker run -d -p 6379:6379 redis:7-alpine
+   
+   # 애플리케이션 시작
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
 
-### 3. API 문서
+### 3. API 문서 및 테스트
 
 애플리케이션이 실행되면, 다음 주소에서 자동으로 생성된 API 문서를 확인할 수 있습니다.
 
-- **Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- **Swagger UI**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
+- **ReDoc**: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
+- **Health Check**: [http://localhost:8000/](http://localhost:8000/)
+
+## 📚 API 엔드포인트 가이드
+
+### 🔐 인증 (Authentication)
+```
+POST /api/v1/auth/signup           # 회원가입
+POST /api/v1/auth/login            # 로그인
+POST /api/v1/auth/social/google    # 구글 소셜 로그인
+POST /api/v1/auth/send-verification # 이메일 인증 발송
+POST /api/v1/auth/verify-email     # 이메일 인증 확인
+GET  /api/v1/auth/me              # 현재 사용자 정보
+```
+
+### 💬 일반 채팅
+```
+POST /api/v1/chat/rooms           # 채팅방 생성
+GET  /api/v1/chat/rooms           # 채팅방 목록
+POST /api/v1/chat/rooms/{id}/chat # AI와 채팅 (스트리밍)
+GET  /api/v1/chat/stats/token-usage # 토큰 사용량 조회
+POST /api/v1/chat/anonymous-chat  # 익명 채팅
+```
+
+### 📁 프로젝트 관리
+```
+POST /api/v1/projects             # 프로젝트 생성
+GET  /api/v1/projects             # 프로젝트 목록
+POST /api/v1/projects/{id}/files/upload # 파일 업로드
+POST /api/v1/projects/{id}/chats/{chat_id}/chat # 전문 AI 채팅
+POST /api/v1/projects/{id}/knowledge/search # 지식 검색
+```
+
+### 👤 사용자 관리
+```
+GET  /api/v1/users/me             # 내 정보 조회
+GET  /api/v1/users/me/subscription # 구독 정보 조회
+POST /api/v1/users/me/change-password # 비밀번호 변경
+```
+
+### 🛠️ 관리자 (Admin Only)
+```
+GET  /api/v1/admin/users          # 전체 사용자 목록
+GET  /api/v1/admin/overview       # 시스템 개요
+PATCH /api/v1/admin/users/{id}/status # 사용자 상태 변경
+GET  /api/v1/admin/subscriptions  # 구독 관리
+```
+
+## 🔧 주요 특징
+
+### 🏗️ 아키텍처 특징
+- **모듈화된 설계**: 기능별로 명확하게 분리된 구조
+- **의존성 주입**: FastAPI의 Depends를 활용한 깔끔한 의존성 관리
+- **에러 핸들링**: 전역 에러 핸들러로 일관된 에러 응답
+- **자동 문서화**: OpenAPI/Swagger 자동 생성
+
+### 🛡️ 보안 기능
+- **JWT 토큰 인증**: 안전한 사용자 인증 시스템
+- **비밀번호 해싱**: bcrypt를 이용한 안전한 비밀번호 저장
+- **CORS 설정**: 프론트엔드와의 안전한 통신
+- **입력 검증**: Pydantic을 통한 강력한 데이터 검증
+
+### ⚡ 성능 최적화
+- **Redis 캐싱**: 반복적인 AI 연산 결과 캐싱
+- **비동기 처리**: 높은 동시성을 위한 async/await 패턴
+- **배치 처리**: 대용량 파일 처리를 위한 백그라운드 작업
+- **데이터베이스 최적화**: 인덱싱 및 쿼리 최적화
+
+### 📊 모니터링 및 관찰성
+- **구조화된 로깅**: JSON 형태의 일관된 로그 포맷
+- **에러 추적**: Sentry를 통한 실시간 에러 모니터링
+- **성능 메트릭**: Prometheus 호환 메트릭 수집
+- **헬스 체크**: 시스템 상태 모니터링
 
 ## 🙌 기여하기
 
-이 프로젝트에 기여하고 싶으시다면, 언제든지 환영합니다! 다음 절차를 따라주세요.
+프로젝트 개선에 참여해주세요!
 
-1. 이 저장소를 Fork합니다.
-2. 새로운 기능이나 버그 수정을 위한 브랜치를 생성합니다 (`git checkout -b feature/AmazingFeature`).
-3. 코드를 수정하고, 변경 사항을 커밋합니다 (`git commit -m 'Add some AmazingFeature'`).
-4. 생성한 브랜치로 Push합니다 (`git push origin feature/AmazingFeature`).
-5. Pull Request를 생성합니다.
+1. **Fork** 이 저장소
+2. **브랜치 생성** (`git checkout -b feature/amazing-feature`)
+3. **변경사항 커밋** (`git commit -m 'Add amazing feature'`)
+4. **브랜치 푸시** (`git push origin feature/amazing-feature`)
+5. **Pull Request 생성**
 
-모든 기여는 프로젝트를 더 나은 방향으로 이끌어가는 데 큰 도움이 됩니다.
+### 개발 가이드라인
+- 코드 스타일: Python PEP 8 준수
+- 타입 힌트 필수 사용
+- 모든 함수에 docstring 작성
+- 테스트 코드 작성 권장
 
 ## 📄 라이선스
 

@@ -2476,3 +2476,66 @@ async def get_anonymous_stats(
     except Exception as e:
         logger.error(f"Anonymous stats error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="통계 조회 중 오류가 발생했습니다.")
+
+
+# 프롬프트 개선 API (일반 채팅용)
+@router.post("/improve-prompt")
+async def improve_chat_prompt(
+    original_prompt: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """사용자 프롬프트를 AI가 개선하여 반환합니다 (일반 채팅용)."""
+    try:
+        # Gemini 2.0 Flash-Lite 클라이언트 초기화
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        # 프롬프트 개선을 위한 시스템 프롬프트
+        improvement_prompt = """당신은 프롬프트 최적화 전문가입니다. 사용자가 제공한 원본 프롬프트를 분석하고, 더 명확하고 효과적인 프롬프트로 개선해주세요.
+
+## 개선 원칙:
+1. **명확성**: 모호한 표현을 구체적으로 개선
+2. **구조화**: 요청사항을 논리적으로 정리
+3. **맥락 제공**: 필요한 배경 정보 추가
+4. **구체성**: 추상적 요청을 구체적으로 변환
+5. **실행 가능성**: AI가 수행할 수 있는 형태로 조정
+
+## 개선 방법:
+- 핵심 의도는 유지하면서 표현 방식 개선
+- 단계별 요청이 필요한 경우 순서 명시
+- 예시나 형식이 필요한 경우 구체적으로 제시
+- 너무 길어지지 않도록 간결하게 유지
+
+사용자의 원본 프롬프트를 개선된 버전으로만 응답해주세요. 설명이나 부가 내용 없이 개선된 프롬프트만 제공하세요."""
+
+        # 개선 요청 메시지 구성 (Gemini API v2.5 형식)
+        content_text = f"다음 프롬프트를 개선해주세요:\n\n{original_prompt}"
+
+        # Gemini 2.0 Flash-Lite로 프롬프트 개선 요청
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=[content_text],
+            config=types.GenerateContentConfig(
+                system_instruction=improvement_prompt,
+                temperature=0.3,
+                max_output_tokens=2048
+            )
+        )
+
+        if not response.text:
+            raise HTTPException(status_code=500, detail="Failed to improve prompt")
+
+        improved_prompt = response.text.strip()
+        
+        return {
+            "original_prompt": original_prompt,
+            "improved_prompt": improved_prompt,
+            "status": "success"
+        }
+
+    except Exception as e:
+        logger.error(f"프롬프트 개선 실패: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"프롬프트 개선에 실패했습니다: {str(e)}"
+        )
