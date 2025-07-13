@@ -2244,80 +2244,75 @@ async def upload_project_file(
     db: Session = Depends(deps.get_db)
 ):
     """프로젝트에 파일 업로드 및 임베딩 생성"""
-    # 타임아웃 설정 (120초)
-    UPLOAD_TIMEOUT = 120
-    
     try:
-        # 타임아웃 설정으로 전체 업로드 프로세스 제한
-        async with asyncio.timeout(UPLOAD_TIMEOUT):
-            # 프로젝트 소유권 확인
-            project = crud_project.get(db=db, id=project_id)
-            if not project or project.user_id != current_user.id:
-                raise HTTPException(status_code=403, detail="Not enough permissions")
+        # 프로젝트 소유권 확인
+        project = crud_project.get(db=db, id=project_id)
+        if not project or project.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+        
+        client = get_gemini_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Gemini client not available")
+        
+        uploaded_files = []
+        
+        for file in files:
+            # 파일 유효성 검사
+            if not await validate_file(file):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid file: {file.filename}"
+                )
             
-            client = get_gemini_client()
-            if not client:
-                raise HTTPException(status_code=500, detail="Gemini client not available")
-            
-            uploaded_files = []
-            
-            for file in files:
-                # 파일 유효성 검사
-                if not await validate_file(file):
+            # Gemini File API로 업로드
+            try:
+                # 파일을 메모리에서 읽기
+                file_content = await file.read()
+                
+                # 파일 크기 재검증
+                if len(file_content) > MAX_FILE_SIZE:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Invalid file: {file.filename}"
+                        detail=f"File {file.filename} is too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
                     )
                 
-                # Gemini File API로 업로드
-                try:
-                    # 파일을 메모리에서 읽기
-                    file_content = await file.read()
-                    
-                    # 파일 크기 재검증
-                    if len(file_content) > MAX_FILE_SIZE:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"File {file.filename} is too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
-                        )
-                    
-                    # Gemini File API 제한 확인 및 처리
-                    if len(file_content) > GEMINI_INLINE_DATA_LIMIT:
-                        logger.warning(f"Warning: File {file.filename} ({len(file_content)} bytes) exceeds Gemini inline data limit. Using File API instead.")
-                        # 큰 파일은 File API를 통해 처리 (이미 현재 구현)
-                    
-                    # File API를 사용하여 업로드
-                    uploaded_file = client.files.upload(
-                        file=io.BytesIO(file_content),
-                        config=dict(
-                            mime_type=file.content_type,
-                            display_name=f"project_{project_id}_{file.filename}"
-                        )
+                # Gemini File API 제한 확인 및 처리
+                if len(file_content) > GEMINI_INLINE_DATA_LIMIT:
+                    logger.warning(f"Warning: File {file.filename} ({len(file_content)} bytes) exceeds Gemini inline data limit. Using File API instead.")
+                    # 큰 파일은 File API를 통해 처리 (이미 현재 구현)
+                
+                # File API를 사용하여 업로드
+                uploaded_file = client.files.upload(
+                    file=io.BytesIO(file_content),
+                    config=dict(
+                        mime_type=file.content_type,
+                        display_name=f"project_{project_id}_{file.filename}"
                     )
-                    
-                    # 파일이 처리될 때까지 대기 (최대 60초로 증가)
-                    max_wait_time = 60
-                    wait_time = 0
-                    while uploaded_file.state.name == 'PROCESSING' and wait_time < max_wait_time:
-                        await asyncio.sleep(2)
-                        wait_time += 2
-                        try:
-                            uploaded_file = client.files.get(name=uploaded_file.name)
-                        except Exception as e:
-                            logger.error(f"Error checking file status: {e}", exc_info=True)
-                            break
-                    
-                    # 처리 상태 확인
-                    if uploaded_file.state.name != 'ACTIVE':
-                        logger.warning(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
-                    
-                    # file.name에서 'files/' 제거 (clean_file_id 정의)
-                    clean_file_id = uploaded_file.name.replace("files/", "") if uploaded_file.name.startswith("files/") else uploaded_file.name
-                    
-                    # 텍스트 추출 및 임베딩 생성 (개선된 방식)
-                    extracted_text = ""
-                    embeddings = []
-                    embedding_data_list = []  # 항상 초기화
+                )
+                
+                # 파일이 처리될 때까지 대기 (최대 120초)
+                max_wait_time = 120
+                wait_time = 0
+                while uploaded_file.state.name == 'PROCESSING' and wait_time < max_wait_time:
+                    await asyncio.sleep(2)
+                    wait_time += 2
+                    try:
+                        uploaded_file = client.files.get(name=uploaded_file.name)
+                    except Exception as e:
+                        logger.error(f"Error checking file status: {e}", exc_info=True)
+                        break
+                
+                # 처리 상태 확인
+                if uploaded_file.state.name != 'ACTIVE':
+                    logger.warning(f"Warning: File {file.filename} is in state {uploaded_file.state.name}")
+                
+                # file.name에서 'files/' 제거 (clean_file_id 정의)
+                clean_file_id = uploaded_file.name.replace("files/", "") if uploaded_file.name.startswith("files/") else uploaded_file.name
+                
+                # 텍스트 추출 및 임베딩 생성 (개선된 방식)
+                extracted_text = ""
+                embeddings = []
+                embedding_data_list = []  # 항상 초기화
                 
                 try:
                     # 파일이 활성 상태일 때만 텍스트 추출
@@ -2674,11 +2669,6 @@ async def upload_project_file(
             "message": f"Successfully uploaded {len(uploaded_files)} files"
         }
     
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=408, 
-            detail="파일 업로드 시간이 초과되었습니다. 다시 시도해주세요."
-        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload files: {str(e)}")
 
