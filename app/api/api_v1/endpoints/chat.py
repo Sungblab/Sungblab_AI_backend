@@ -9,6 +9,7 @@ from app.schemas.chat import (
 from app.crud import crud_chat, crud_stats, crud_project, crud_subscription
 from app.crud.crud_anonymous_usage import crud_anonymous_usage
 from app.db.session import get_db
+from app.db.retry_session import get_robust_db, retry_db_operation
 from app.core.security import get_current_user
 from app.models.user import User
 import json
@@ -2400,10 +2401,11 @@ async def anonymous_chat(
 
 
 @router.get("/anonymous-usage/{session_id}")
+@retry_db_operation(max_retries=3, delay=1.0)
 async def get_anonymous_usage(
     request: Request,
     session_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_robust_db)
 ):
     """익명 사용자의 현재 사용량 조회"""
     

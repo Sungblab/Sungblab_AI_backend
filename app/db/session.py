@@ -1,26 +1,30 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import QueuePool  # NullPool 대신 QueuePool 사용
+from sqlalchemy.pool import QueuePool
 from app.core.config import settings
 
 
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URL,
-    poolclass=QueuePool,  # 연결 풀 활성화
-    pool_size=10,  # 기본 연결 풀 크기 증가 (동시 요청 대응)
-    max_overflow=20,  # 최대 추가 연결 수 증가 (총 30개)
-    pool_pre_ping=True,
-    pool_recycle=1800,  # 30분마다 연결 재활용 (더 자주)
-    pool_reset_on_return='commit',  # 연결 반환 시 커밋
-    pool_timeout=15,  # 연결 대기 시간 제한 (단축)
-    echo=False,  # SQL 로깅 비활성화 (성능 향상)
+    poolclass=QueuePool,
+    pool_size=5,  # SSL 연결 안정성을 위해 줄임
+    max_overflow=10,  # 총 15개로 제한
+    pool_pre_ping=True,  # 연결 재사용 전 ping 테스트
+    pool_recycle=300,  # 5분마다 연결 재활용 (SSL 타임아웃 방지)
+    pool_reset_on_return='commit',
+    pool_timeout=30,  # 연결 대기 시간 증가
+    echo=False,
     connect_args={
-        "connect_timeout": 10,  # 연결 타임아웃
+        "connect_timeout": 30,  # 연결 타임아웃 증가
         "sslmode": "require",
-        "keepalives_idle": 300,  # keepalive 설정 (더 자주)
-        "keepalives_interval": 15,
-        "keepalives_count": 3,
-        "application_name": "sungblab_api"  # 애플리케이션 식별
+        "sslcert": None,  # SSL 인증서 설정 명시
+        "sslkey": None,
+        "sslrootcert": None,
+        "keepalives_idle": 60,  # 1분으로 단축 (더 자주 keepalive)
+        "keepalives_interval": 10,  # 10초 간격
+        "keepalives_count": 6,  # 재시도 횟수 증가
+        "tcp_user_timeout": 30000,  # TCP 사용자 타임아웃 (30초)
+        "application_name": "sungblab_api"
     }
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -28,10 +32,15 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def get_db():
     db = SessionLocal()
     try:
+        # 연결 상태 확인 (SSL 연결 끊어짐 감지)
+        db.execute(text("SELECT 1"))
         yield db
     except Exception as e:
         # 에러 발생 시 롤백
         db.rollback()
+        # SSL 연결 오류인 경우 엔진 재시작
+        if "SSL connection has been closed unexpectedly" in str(e):
+            engine.dispose()
         raise e
     finally:
         db.close()

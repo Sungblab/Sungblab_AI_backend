@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from datetime import datetime
 from app.core.utils import KST
 from app.core.health_monitor import get_health_status, health_monitor
+from app.db.retry_session import test_connection_health
 
 router = APIRouter()
 
@@ -12,7 +13,14 @@ def health_check():
     
     API 서버의 상태를 확인하는 엔드포인트입니다.
     """
-    return {"status": "healthy", "timestamp": datetime.now(KST).isoformat()}
+    db_healthy = test_connection_health()
+    status = "healthy" if db_healthy else "unhealthy"
+    
+    return {
+        "status": status,
+        "database": "connected" if db_healthy else "disconnected",
+        "timestamp": datetime.now(KST).isoformat()
+    }
 
 @router.get("/health/detailed", tags=["health"])
 def detailed_health_check():
