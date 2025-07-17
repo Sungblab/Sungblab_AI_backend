@@ -5,7 +5,6 @@ import logging
 
 from app.core.security import get_current_user, get_password_hash, verify_password
 from app.db.session import get_db
-from app.db.retry_session import get_robust_db, retry_db_operation
 from app.schemas.auth import User
 from app.api import deps
 from app.models.subscription import Subscription, SubscriptionPlan
@@ -17,10 +16,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/me", response_model=User)
-@retry_db_operation(max_retries=3, delay=1.0)
 def read_current_user(
     current_user = Depends(get_current_user),
-    db: Session = Depends(get_robust_db)
+    db: Session = Depends(get_db)
 ):
     """
     현재 로그인한 사용자의 정보를 반환합니다.
@@ -28,10 +26,9 @@ def read_current_user(
     return current_user 
 
 @router.get("/me/subscription", response_model=dict)
-@retry_db_operation(max_retries=3, delay=1.0)
 def get_my_subscription(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_robust_db)
+    db: Session = Depends(deps.get_db)
 ):
     """현재 사용자의 구독 정보를 조회합니다."""
     subscription = db.query(Subscription).filter(

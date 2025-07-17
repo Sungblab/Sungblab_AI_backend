@@ -19,9 +19,9 @@ class DatabaseOptimizer:
     """데이터베이스 최적화 관리자"""
     
     def __init__(self):
-        self.connection_check_interval = 30  # 30초마다 체크
-        self.slow_query_threshold = 0.5  # 0.5초 이상 느린 쿼리
-        self.pool_warning_threshold = 0.8  # 80% 이상 사용시 경고
+        self.connection_check_interval = 60  # 1분마다 체크
+        self.slow_query_threshold = 1.0  # 1초 이상 느린 쿼리
+        self.pool_warning_threshold = 0.7  # 70% 이상 사용시 경고
         
     def get_connection_pool_status(self) -> Dict[str, Any]:
         """연결 풀 상태 확인"""
@@ -109,14 +109,14 @@ class DatabaseOptimizer:
             logger.error(f"활성 연결 수 확인 실패: {e}", exc_info=True)
             return 0
     
-    def kill_idle_connections(self, idle_minutes: int = 30) -> int:
+    def kill_idle_connections(self, idle_minutes: int = 60) -> int:
         """유휴 연결 정리"""
         if not settings.ENABLE_PERFORMANCE_MONITORING:
             return 0
         try:
             db = SessionLocal()
             try:
-                # 30분 이상 유휴 상태인 연결 종료
+                # 1시간 이상 유휴 상태인 연결 종료
                 result = db.execute(text("""
                     SELECT pg_terminate_backend(pid)
                     FROM pg_stat_activity
@@ -224,8 +224,8 @@ async def monitor_database_performance():
             logger.info(f"DB 상태: 풀 사용률 {pool_status.get('usage_percentage', 0):.1f}%, 활성 연결 {active_connections}개")
             
             # 연결 풀 사용률이 높으면 유휴 연결 정리
-            if pool_status.get('usage_percentage', 0) > 80:
-                db_optimizer.kill_idle_connections(10)  # 10분 이상 유휴 연결 정리
+            if pool_status.get('usage_percentage', 0) > 70:
+                db_optimizer.kill_idle_connections(30)  # 30분 이상 유휴 연결 정리
             
             await asyncio.sleep(60)  # 1분마다 체크
             

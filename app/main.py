@@ -157,15 +157,6 @@ async def startup_event():
         if settings.ENABLE_HEALTH_MONITOR:
             health_monitor.start()
         
-        # 데이터베이스 연결 상태 모니터링 시작
-        try:
-            from app.db.retry_session import monitor_connection_health
-            import asyncio
-            asyncio.create_task(monitor_connection_health())
-            logger.info("✅ 데이터베이스 연결 모니터링 시작")
-        except Exception as e:
-            logger.warning(f"⚠️  데이터베이스 모니터링 시작 실패: {e}")
-        
         # 스케줄링 태스크 시작 (선택적)
         if settings.ENABLE_SCHEDULED_TASKS:
             scheduled_tasks.start()

@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     ENABLE_MEMORY_MANAGER: bool = False
     ENABLE_HEALTH_MONITOR: bool = True  # health API 필요하므로 유지
     ENABLE_SCHEDULED_TASKS: bool = True
-    ENABLE_PERFORMANCE_MONITORING: bool = False
+    ENABLE_PERFORMANCE_MONITORING: bool = True  # DB 모니터링 활성화
     
     # JWT 설정
     SECRET_KEY: str

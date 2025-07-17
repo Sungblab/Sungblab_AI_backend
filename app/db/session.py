@@ -1,29 +1,25 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool  # NullPool 대신 QueuePool 사용
 from app.core.config import settings
 
 
 engine = create_engine(
     settings.SQLALCHEMY_DATABASE_URL,
     poolclass=QueuePool,
-    pool_size=5,  # SSL 연결 안정성을 위해 줄임
-    max_overflow=10,  # 총 15개로 제한
-    pool_pre_ping=True,  # 연결 재사용 전 ping 테스트
-    pool_recycle=300,  # 5분마다 연결 재활용 (SSL 타임아웃 방지)
+    pool_size=20,  # 큰 서비스용 연결 풀 크기 증가
+    max_overflow=30,  # 총 50개 연결 허용
+    pool_pre_ping=True,
+    pool_recycle=1800,  # 30분마다 연결 재활용 (장기간 안정성)
     pool_reset_on_return='commit',
-    pool_timeout=30,  # 연결 대기 시간 증가
+    pool_timeout=30,  # 타임아웃 충분히 설정
     echo=False,
     connect_args={
-        "connect_timeout": 30,  # 연결 타임아웃 증가
+        "connect_timeout": 15,  # 연결 타임아웃 여유있게 설정
         "sslmode": "require",
-        "sslcert": None,  # SSL 인증서 설정 명시
-        "sslkey": None,
-        "sslrootcert": None,
-        "keepalives_idle": 60,  # 1분으로 단축 (더 자주 keepalive)
-        "keepalives_interval": 10,  # 10초 간격
-        "keepalives_count": 6,  # 재시도 횟수 증가
-        "tcp_user_timeout": 30000,  # TCP 사용자 타임아웃 (30초)
+        "keepalives_idle": 120,  # 2분으로 설정 (더 자주 체크)
+        "keepalives_interval": 10,  # 10초마다 keepalive
+        "keepalives_count": 5,  # 더 많은 재시도
         "application_name": "sungblab_api"
     }
 )
@@ -32,15 +28,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def get_db():
     db = SessionLocal()
     try:
-        # 연결 상태 확인 (SSL 연결 끊어짐 감지)
-        db.execute(text("SELECT 1"))
         yield db
     except Exception as e:
-        # 에러 발생 시 롤백
         db.rollback()
-        # SSL 연결 오류인 경우 엔진 재시작
-        if "SSL connection has been closed unexpectedly" in str(e):
-            engine.dispose()
         raise e
     finally:
         db.close()

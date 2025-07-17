@@ -4,7 +4,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.api import deps
-from app.db.retry_session import get_robust_db, retry_db_operation
 from app.crud import crud_project, crud_stats, crud_subscription
 from app.crud import crud_embedding
 from app.crud.crud_embedding import ProjectEmbeddingCreate
@@ -1245,9 +1244,8 @@ def delete_project_chat(
 
 # 프로젝트 목록 조회
 @router.get("/", response_model=List[Dict[str, Any]])
-@retry_db_operation(max_retries=3, delay=1.0)
 def get_projects(
-    db: Session = Depends(get_robust_db),
+    db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
     """사용자의 프로젝트 목록을 조회합니다."""
