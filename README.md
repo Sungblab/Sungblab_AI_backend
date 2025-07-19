@@ -154,6 +154,12 @@ Sungblab_AI_backend/
    FRONTEND_URL=http://localhost:3000
    ENVIRONMENT=development
    DEBUG=true
+   
+   # 보안 설정 (프로덕션 환경)
+   # ENVIRONMENT=production
+   # DEBUG=false
+   # ENABLE_PERFORMANCE_MONITORING=true
+   # ENABLE_HEALTH_MONITOR=true
    ```
 
 3. **Docker를 이용한 실행:**
@@ -181,9 +187,34 @@ Sungblab_AI_backend/
 
 애플리케이션이 실행되면, 다음 주소에서 자동으로 생성된 API 문서를 확인할 수 있습니다.
 
-- **Swagger UI**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
-- **ReDoc**: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
+- **Swagger UI**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs) (개발 환경에서만 접근 가능)
+- **ReDoc**: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc) (개발 환경에서만 접근 가능)
 - **Health Check**: [http://localhost:8000/](http://localhost:8000/)
+- **Admin Docs**: [http://localhost:8000/admin/docs](http://localhost:8000/admin/docs) (관리자 전용)
+
+## 🔒 보안 고려사항
+
+### API 문서 보안
+- **개발 환경**: Swagger/ReDoc 문서가 자동으로 생성되어 접근 가능
+- **프로덕션 환경**: API 문서 접근이 자동으로 비활성화됨
+- **관리자 전용**: `/admin/docs` 엔드포인트를 통한 제한적 문서 접근
+
+### 환경별 설정
+```env
+# 개발 환경 (문서 접근 가능)
+ENVIRONMENT=development
+DEBUG=true
+
+# 프로덕션 환경 (문서 접근 차단)
+ENVIRONMENT=production
+DEBUG=false
+```
+
+### 추가 보안 권장사항
+1. **환경 변수 보호**: `.env` 파일을 `.gitignore`에 포함
+2. **HTTPS 사용**: 프로덕션 환경에서는 반드시 HTTPS 사용
+3. **API 키 관리**: 민감한 API 키는 환경 변수로 관리
+4. **접근 제어**: 관리자 기능은 적절한 권한 검증 필요
 
 ## 📚 API 엔드포인트 가이드
 

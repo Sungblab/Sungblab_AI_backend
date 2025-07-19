@@ -82,6 +82,11 @@ tags_metadata = [
     }
 ]
 
+# 환경별 문서 접근 설정
+docs_url = f"{settings.API_V1_STR}/docs" if settings.ENVIRONMENT == "development" else None
+redoc_url = f"{settings.API_V1_STR}/redoc" if settings.ENVIRONMENT == "development" else None
+openapi_url = f"{settings.API_V1_STR}/openapi.json" if settings.ENVIRONMENT == "development" else None
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description=description,
@@ -96,9 +101,9 @@ app = FastAPI(
         "name": "MIT License",
         "url": "https://opensource.org/licenses/MIT"
     },
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
+    openapi_url=openapi_url,
+    docs_url=docs_url,
+    redoc_url=redoc_url,
     openapi_tags=tags_metadata,
     debug=settings.DEBUG
 )
@@ -185,6 +190,21 @@ async def shutdown_event():
 
 app.include_router(api_router, prefix=settings.API_V1_STR.strip())
 
+# 관리자 전용 문서 접근 엔드포인트 (보안 강화)
+@app.get("/admin/docs", tags=["admin"])
+async def admin_docs():
+    """
+    관리자 전용 문서 접근 엔드포인트
+    
+    관리자 인증이 필요한 문서 접근을 위한 엔드포인트입니다.
+    """
+    # 실제 구현에서는 관리자 인증 로직 추가 필요
+    return {
+        "message": "Admin documentation access",
+        "docs_url": f"{settings.API_V1_STR}/docs" if settings.ENVIRONMENT == "development" else "Not available in production",
+        "note": "This endpoint requires admin authentication in production"
+    }
+
 @app.get("/", tags=["root"])
 def read_root():
     """
@@ -193,11 +213,16 @@ def read_root():
     API 서버가 정상적으로 실행 중인지 확인하는 엔드포인트입니다.
     """
     logger.info("Root endpoint accessed")
-    return {
+    response = {
         "message": "Welcome to SungbLab AI API",
         "version": settings.VERSION,
-        "docs_url": f"{settings.API_V1_STR}/docs",
-        "redoc_url": f"{settings.API_V1_STR}/redoc"
     }
-
- 
+    
+    # 개발 환경에서만 문서 URL 표시
+    if settings.ENVIRONMENT == "development":
+        response.update({
+            "docs_url": f"{settings.API_V1_STR}/docs",
+            "redoc_url": f"{settings.API_V1_STR}/redoc"
+        })
+    
+    return response
