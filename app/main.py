@@ -148,16 +148,24 @@ async def startup_event():
         
         # 데이터베이스 연결 풀 사전 초기화 (워밍업)
         from app.db.session import engine, SessionLocal
+        from sqlalchemy import text
         logger.info("데이터베이스 연결 풀 초기화 시작...")
         
         # 연결 풀 워밍업: 몇 개의 연결을 미리 생성
+        warmup_success_count = 0
         for i in range(5):
             try:
                 db = SessionLocal()
-                db.execute("SELECT 1")
+                result = db.execute(text("SELECT 1"))
+                result.fetchone()  # 결과 확실히 처리
+                db.commit()  # 트랜잭션 커밋
                 db.close()
+                warmup_success_count += 1
+                logger.info(f"DB 워밍업 {i+1}/5 성공")
             except Exception as e:
                 logger.error(f"DB 워밍업 실패 {i+1}: {e}")
+        
+        logger.info(f"DB 워밍업 완료: {warmup_success_count}/5 성공")
         
         logger.info("데이터베이스 연결 풀 초기화 완료")
         
