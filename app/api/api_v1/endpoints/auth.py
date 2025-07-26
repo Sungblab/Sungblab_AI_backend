@@ -424,16 +424,36 @@ def refresh_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # 기존 토큰의 남은 시간 확인하여 적절한 만료 시간 설정
+    remaining_time = user.refresh_token_expires - datetime.now(timezone.utc)
+    
+    # 장기 로그인 사용자 감지 (남은 refresh token이 20일 이상이면 장기 토큰)
+    is_long_term = remaining_time.days >= 20
+    
     # 새로운 토큰들 생성
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    if is_long_term:
+        # 장기 로그인 사용자는 더 긴 access token 제공
+        access_token_expires = timedelta(hours=12)  # 12시간
+    else:
+        # 일반 사용자는 기본 시간
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
     access_token = security.create_access_token(
         user.id, expires_delta=access_token_expires
     )
-    new_refresh_token = security.create_refresh_token(user.id)
     
-    # 새로운 refresh token 저장
-    refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    crud_user.update_refresh_token(db, user=user, refresh_token=new_refresh_token, expires_delta=refresh_expires)
+    # Refresh token 연장 정책: 기존 만료 시간의 80% 지점에서 자동 연장
+    refresh_remaining_ratio = remaining_time.total_seconds() / (settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60)
+    
+    if refresh_remaining_ratio > 0.8:
+        # 충분한 시간이 남아있으면 기존 refresh token 유지
+        new_refresh_token = user.refresh_token
+        refresh_expires = user.refresh_token_expires - datetime.now(timezone.utc)
+    else:
+        # 만료가 임박하면 새로운 refresh token 발급 및 시간 연장
+        new_refresh_token = security.create_refresh_token(user.id)
+        refresh_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        crud_user.update_refresh_token(db, user=user, refresh_token=new_refresh_token, expires_delta=refresh_expires)
     
     return {
         "access_token": access_token,

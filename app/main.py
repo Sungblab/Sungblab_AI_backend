@@ -146,6 +146,21 @@ async def startup_event():
     try:
         init_db()
         
+        # 데이터베이스 연결 풀 사전 초기화 (워밍업)
+        from app.db.session import engine, SessionLocal
+        logger.info("데이터베이스 연결 풀 초기화 시작...")
+        
+        # 연결 풀 워밍업: 몇 개의 연결을 미리 생성
+        for i in range(5):
+            try:
+                db = SessionLocal()
+                db.execute("SELECT 1")
+                db.close()
+            except Exception as e:
+                logger.error(f"DB 워밍업 실패 {i+1}: {e}")
+        
+        logger.info("데이터베이스 연결 풀 초기화 완료")
+        
         # 데이터베이스 최적화 적용
         try:
             from app.core.db_optimization import db_optimizer
