@@ -12,7 +12,11 @@ from app.core.config import settings
 
 # 성능 로깅 설정
 performance_logger = logging.getLogger("performance")
-performance_logger.setLevel(logging.INFO)
+# 환경에 따라 로그 레벨 설정
+if settings.ENVIRONMENT == "production":
+    performance_logger.setLevel(logging.WARNING)
+else:
+    performance_logger.setLevel(logging.INFO)
 
 class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
     """성능 모니터링 미들웨어"""
@@ -60,11 +64,16 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
             "timestamp": datetime.now().isoformat()
         }
         
-        # 느린 요청 별도 로깅
-        if process_time > self.slow_request_threshold:
-            performance_logger.warning(f"SLOW REQUEST: {log_data}")
+        # 프로덕션 환경에서는 느린 요청만 로깅
+        if settings.ENVIRONMENT == "production":
+            if process_time > self.slow_request_threshold:
+                performance_logger.warning(f"SLOW REQUEST: {log_data}")
         else:
-            performance_logger.info(f"REQUEST: {log_data}")
+            # 개발 환경에서만 모든 요청 로깅
+            if process_time > self.slow_request_threshold:
+                performance_logger.warning(f"SLOW REQUEST: {log_data}")
+            else:
+                performance_logger.info(f"REQUEST: {log_data}")
         
         return response
 
